@@ -4,18 +4,16 @@ export type YearRow = {
   age: number;
   yearIndex: number;
 
-  income: number;
-  expenses: number;
-  savings: number;
+  grossIncome: number;
+  housingMonthly: number;
+  debtMonthly: number;
+  lifestyleMonthly: number;
 
-  endBalances: {
-    cash: number;
-    taxable: number;
-    taxDeferred: number;
-    roth: number;
-  };
+  totalMonthlyOutflow: number;
+  annualSavings: number;
 
-  netWorth: number;
+  endAssetValue: number; // total assets excluding home unless you choose to include
+  endNetWorth: number;   // assets + home - debt balances (later)
 };
 
 export function simulatePlan(_plan: PlanState): YearRow[] {
