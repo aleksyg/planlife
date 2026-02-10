@@ -60,7 +60,7 @@ export type PlanState = {
 
   // Placeholder sections you said we’ll design next
   expenses: Expenses;
-  debt?: unknown;
+  debt: Debt[];
   balanceSheet?: unknown;
 
   // Assumptions (keep minimal for now)
@@ -87,3 +87,26 @@ export type Expenses =
       items: ExpenseLineItem[];
     };
 
+export type DebtType =
+  | 'creditCard'
+  | 'studentLoan'
+  | 'autoLoan'
+  | 'mortgageOther'
+  | 'other';
+
+export type Debt = {
+  id: string;            // stable key for add/remove
+  label: string;         // editable (e.g. "Amex", "Student Loan", "Car")
+  type: DebtType;
+
+  balance: number;
+
+  aprPct?: number;       // e.g. 19.99
+
+  // User can either provide this OR we compute it later
+  requiredMonthlyPayment?: number;
+
+  // New: final payoff date instead of termMonths
+  finalPaymentDate?: string; 
+  // ISO string recommended: "2032-06-01"
+};
