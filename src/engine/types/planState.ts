@@ -1,25 +1,32 @@
-export type YesNo = 'yes' | 'no';
+// ---------- Shared primitives ----------
+export type Owner = 'user' | 'partner' | 'joint';
 
+// Month granularity for user-friendly payoff / planning dates.
+// Store as "YYYY-MM" (e.g. "2032-06").
+export type YearMonth = `${number}-${'01'|'02'|'03'|'04'|'05'|'06'|'07'|'08'|'09'|'10'|'11'|'12'}`;
+
+// ---------- Household / background ----------
 export type Housing =
   | {
       status: 'rent';
-      monthlyRent: number; // required if rent
+      monthlyRent: number;
     }
   | {
       status: 'own';
-      monthlyPaymentPITI: number; // payment including taxes + insurance
+      monthlyPaymentPITI: number; // includes taxes + insurance
     };
 
 export type Child = {
-    id: string; // stable key for add/remove UI (e.g. crypto.randomUUID())
-    age: number; // v1: just age; later we can add childcare/college toggles etc
+  id: string; // stable key for add/remove UI (e.g. crypto.randomUUID())
+  age: number;
 };
 
+// ---------- Income ----------
 export type RetirementPlan = {
   hasPlan: boolean; // 401k/403b/etc
   employeeContributionPct?: number; // 0–100, required if hasPlan
 
-  hasEmployerMatch?: boolean; // required if hasPlan? we can decide later
+  hasEmployerMatch?: boolean;
   employerMatchPct?: number; // e.g. 50 means "50% match"
   employerMatchUpToPct?: number; // e.g. 6 means "up to 6% of comp"
 };
@@ -45,34 +52,14 @@ export type Household = {
   partner?: Person; // required if hasPartner
 
   hasChildren: boolean;
-  children?: Child[]; // v1: start with [ {age} ] and later allow add/remove
+  children?: Child[]; // add/remove
 
   housing: Housing;
 };
 
-export type PlanState = {
-  // Horizon / projection settings
-  startAge: number;
-  endAge: number;
-
-  // Household & inputs
-  household: Household;
-
-  // Placeholder sections you said we’ll design next
-  expenses: Expenses;
-  debt: Debt[];
-  balanceSheet: BalanceSheet;
-
-  // Assumptions (keep minimal for now)
-  assumptions: {
-    inflationRate: number; // e.g. 0.025
-    returnRate: number; // e.g. 0.07
-    cashRate: number; // e.g. 0.04
-  };
-};
-
+// ---------- Expenses (lifestyle-only) ----------
 export type ExpenseLineItem = {
-  id: string; // stable key for add/remove UI (e.g. crypto.randomUUID())
+  id: string; // stable key for add/remove UI
   label: string; // editable category label
   monthlyAmount: number;
 };
@@ -87,6 +74,7 @@ export type Expenses =
       items: ExpenseLineItem[]; // lifestyle-only categories
     };
 
+// ---------- Debt ----------
 export type DebtType =
   | 'creditCard'
   | 'studentLoan'
@@ -95,24 +83,28 @@ export type DebtType =
   | 'other';
 
 export type Debt = {
-  id: string;            // stable key for add/remove
-  label: string;         // editable (e.g. "Amex", "Student Loan", "Car")
+  id: string; // stable key for add/remove
+  label: string; // editable (e.g. "Amex", "Student Loan", "Car")
   type: DebtType;
 
   balance: number;
+  aprPct: number; // required for calc (e.g. 6.5 for 6.5%)
 
-  aprPct?: number;       // e.g. 19.99
+  payoffYearMonth: YearMonth; // required, month granularity
 
-  // User can either provide this OR we compute it later
-  requiredMonthlyPayment?: number;
-
-  // New: final payoff date instead of termMonths
-  finalPaymentDate?: string; 
-  // ISO string recommended: "2032-06-01"
+  /**
+   * The UI should compute a suggested monthly payment once balance/apr/payoff are present.
+   * User may override; if set, this is the truth used by the engine.
+   *
+   * UI behavior recommendation:
+   * - Store the override separately so you can keep showing "suggested vs actual".
+   * - If user edits balance/apr/payoff: recompute suggested; keep override unless user clears it.
+   */
+  monthlyPayment: number; // editable; treated as truth in engine
+  monthlyPaymentIsOverride: boolean; // tracks whether user changed it from suggested
 };
 
-export type Owner = 'user' | 'partner' | 'joint';
-
+// ---------- Balance Sheet ----------
 export type AssetType =
   | 'cash'
   | 'brokerage' // taxable investments
@@ -123,22 +115,42 @@ export type AssetType =
   | 'other';
 
 export type AssetAccount = {
-  id: string;        // stable key for add/remove
-  label: string;     // editable (e.g. "Checking", "Vanguard Brokerage", "401k")
+  id: string; // stable key for add/remove
+  label: string; // editable (e.g. "Checking", "Vanguard Brokerage", "401k")
   type: AssetType;
   owner: Owner;
   balance: number;
 
-  // optional v1 fields (we won’t use them immediately, but they’re useful soon)
-  costBasis?: number; // only relevant for brokerage; can be omitted in v1
+  // optional v1 fields (not used immediately)
+  costBasis?: number; // only relevant for brokerage
 };
 
 export type BalanceSheet = {
   assets: AssetAccount[];
 
-  // Optional: include home in net worth if they own
-  home?: {
-    owner: Owner;       // often 'joint'
+  // Always include home; UI can show/hide based on housing.status if desired.
+  home: {
+    owner: Owner; // often 'joint'
     currentValue: number;
+  };
+};
+
+// ---------- PlanState (canonical source of truth) ----------
+export type PlanState = {
+  // Projection settings
+  startAge: number;
+  endAge: number;
+
+  // Inputs
+  household: Household;
+  expenses: Expenses;
+  debt: Debt[];
+  balanceSheet: BalanceSheet;
+
+  // Assumptions (we’ll refine after this is locked)
+  assumptions: {
+    inflationRate: number; // e.g. 0.025
+    returnRate: number; // e.g. 0.07
+    cashRate: number; // e.g. 0.04
   };
 };
