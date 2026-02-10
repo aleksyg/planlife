@@ -60,28 +60,37 @@ export function simulatePlan(plan: PlanState): YearRow[] {
   const totalMonthlyOutflow = lifestyleMonthly + housingMonthly + debtMonthly;
   const annualOutflow = totalMonthlyOutflow * 12;
 
-  // v1 (cashflow-only): start with total starting assets (excluding home for "asset value")
-  const startingAssets = plan.balanceSheet.assets.reduce((sum, a) => sum + a.balance, 0);
   const homeValue = plan.balanceSheet.home.currentValue;
+  const totalDebtBalance = plan.debt.reduce((sum, d) => sum + d.balance, 0);
 
-  // We’ll evolve these in Step 3 when we add returns & allocate savings.
-  let assetValue = startingAssets;
+  // Step 3A: track cash vs non-cash totals (we'll break out accounts later)
+  let cashValue = plan.balanceSheet.assets
+    .filter((a) => a.type === 'cash')
+    .reduce((sum, a) => sum + a.balance, 0);
+
+  let nonCashValue = plan.balanceSheet.assets
+    .filter((a) => a.type !== 'cash')
+    .reduce((sum, a) => sum + a.balance, 0);
 
   const years = plan.endAge - plan.startAge + 1;
+
   for (let i = 0; i < years; i++) {
     const age = plan.startAge + i;
 
     const grossIncome = getHouseholdGrossIncomeAtAge(plan, age);
 
-    // v1: no taxes, no retirement contribution logic yet
+    // v1: still no taxes, no retirement contribution logic yet
     const annualSavings = grossIncome - annualOutflow;
 
-    // cashflow-only accumulation: add savings directly to total assets
-    assetValue += annualSavings;
+    // Apply returns to starting balances for the year
+    cashValue *= 1 + plan.assumptions.cashRate;
+    nonCashValue *= 1 + plan.assumptions.returnRate;
 
-    // v1 net worth: assets + home - debt balances (debt balances are principal, not payments)
-    const totalDebtBalance = plan.debt.reduce((sum, d) => sum + d.balance, 0);
-    const endNetWorth = assetValue + homeValue - totalDebtBalance;
+    // Route all savings into cash (can be negative)
+    cashValue += annualSavings;
+
+    const endAssetValue = cashValue + nonCashValue;
+    const endNetWorth = endAssetValue + homeValue - totalDebtBalance;
 
     rows.push({
       age,
@@ -95,11 +104,10 @@ export function simulatePlan(plan: PlanState): YearRow[] {
       totalMonthlyOutflow,
       annualSavings,
 
-      endAssetValue: assetValue,
+      endAssetValue,
       endNetWorth,
     });
   }
 
   return rows;
 }
-
