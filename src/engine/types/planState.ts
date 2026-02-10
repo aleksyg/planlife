@@ -80,11 +80,11 @@ export type ExpenseLineItem = {
 export type Expenses =
   | {
       mode: 'total';
-      totalMonthly: number;
+      lifestyleMonthly: number; // excludes housing + debt
     }
   | {
       mode: 'itemized';
-      items: ExpenseLineItem[];
+      items: ExpenseLineItem[]; // lifestyle-only categories
     };
 
 export type DebtType =
