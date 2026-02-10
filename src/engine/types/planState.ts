@@ -1,21 +1,71 @@
+export type YesNo = 'yes' | 'no';
+
+export type Housing =
+  | {
+      status: 'rent';
+      monthlyRent: number; // required if rent
+    }
+  | {
+      status: 'own';
+      monthlyPaymentPITI: number; // payment including taxes + insurance
+    };
+
+export type Child = {
+  age: number; // v1: just age; later we can add childcare/college toggles etc
+};
+
+export type RetirementPlan = {
+  hasPlan: boolean; // 401k/403b/etc
+  employeeContributionPct?: number; // 0–100, required if hasPlan
+
+  hasEmployerMatch?: boolean; // required if hasPlan? we can decide later
+  employerMatchPct?: number; // e.g. 50 means "50% match"
+  employerMatchUpToPct?: number; // e.g. 6 means "up to 6% of comp"
+};
+
+export type Income = {
+  baseAnnual: number;
+
+  hasBonus: boolean;
+  bonusAnnual?: number; // required if hasBonus
+
+  retirement: RetirementPlan;
+};
+
+export type Person = {
+  age: number;
+  income: Income;
+};
+
+export type Household = {
+  user: Person;
+
+  hasPartner: boolean;
+  partner?: Person; // required if hasPartner
+
+  hasChildren: boolean;
+  children?: Child[]; // v1: start with [ {age} ] and later allow add/remove
+
+  housing: Housing;
+};
+
 export type PlanState = {
-  birthYear: number;
+  // Horizon / projection settings
   startAge: number;
   endAge: number;
 
-  balances: {
-    cash: number;
-    taxable: number;
-    taxDeferred: number;
-    roth: number;
+  // Household & inputs
+  household: Household;
+
+  // Placeholder sections you said we’ll design next
+  expenses?: unknown;
+  debt?: unknown;
+  balanceSheet?: unknown;
+
+  // Assumptions (keep minimal for now)
+  assumptions: {
+    inflationRate: number; // e.g. 0.025
+    returnRate: number; // e.g. 0.07
+    cashRate: number; // e.g. 0.04
   };
-
-  annualIncome: number;
-  incomeGrowthRate: number;
-
-  monthlyExpenses: number;
-  inflationRate: number;
-
-  returnRate: number;
-  cashRate: number;
 };
