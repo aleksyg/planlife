@@ -50,7 +50,56 @@ function getHouseholdGrossIncomeAtAge(plan: PlanState, targetAge: number): numbe
   return total;
 }
 
-export function simulatePlan(_plan: PlanState): YearRow[] {
-  // Step-by-step: we’ll fill this in next.
-  return [];
+export function simulatePlan(plan: PlanState): YearRow[] {
+  const rows: YearRow[] = [];
+
+  const lifestyleMonthly = getLifestyleMonthly(plan.expenses);
+  const housingMonthly = getHousingMonthly(plan.household.housing);
+  const debtMonthly = getDebtMonthly(plan);
+
+  const totalMonthlyOutflow = lifestyleMonthly + housingMonthly + debtMonthly;
+  const annualOutflow = totalMonthlyOutflow * 12;
+
+  // v1 (cashflow-only): start with total starting assets (excluding home for "asset value")
+  const startingAssets = plan.balanceSheet.assets.reduce((sum, a) => sum + a.balance, 0);
+  const homeValue = plan.balanceSheet.home.currentValue;
+
+  // We’ll evolve these in Step 3 when we add returns & allocate savings.
+  let assetValue = startingAssets;
+
+  const years = plan.endAge - plan.startAge + 1;
+  for (let i = 0; i < years; i++) {
+    const age = plan.startAge + i;
+
+    const grossIncome = getHouseholdGrossIncomeAtAge(plan, age);
+
+    // v1: no taxes, no retirement contribution logic yet
+    const annualSavings = grossIncome - annualOutflow;
+
+    // cashflow-only accumulation: add savings directly to total assets
+    assetValue += annualSavings;
+
+    // v1 net worth: assets + home - debt balances (debt balances are principal, not payments)
+    const totalDebtBalance = plan.debt.reduce((sum, d) => sum + d.balance, 0);
+    const endNetWorth = assetValue + homeValue - totalDebtBalance;
+
+    rows.push({
+      age,
+      yearIndex: i,
+
+      grossIncome,
+      housingMonthly,
+      debtMonthly,
+      lifestyleMonthly,
+
+      totalMonthlyOutflow,
+      annualSavings,
+
+      endAssetValue: assetValue,
+      endNetWorth,
+    });
+  }
+
+  return rows;
 }
+
