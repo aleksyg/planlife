@@ -140,6 +140,8 @@ export type BalanceSheet = {
 // ---------- PlanState (canonical source of truth) ----------
 export type PlanState = {
   // Projection settings
+  asOfYearMonth: YearMonth;
+
   startAge: number;
   endAge: number;
 
