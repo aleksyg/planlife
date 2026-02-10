@@ -61,7 +61,7 @@ export type PlanState = {
   // Placeholder sections you said we’ll design next
   expenses: Expenses;
   debt: Debt[];
-  balanceSheet?: unknown;
+  balanceSheet: BalanceSheet;
 
   // Assumptions (keep minimal for now)
   assumptions: {
@@ -109,4 +109,36 @@ export type Debt = {
   // New: final payoff date instead of termMonths
   finalPaymentDate?: string; 
   // ISO string recommended: "2032-06-01"
+};
+
+export type Owner = 'user' | 'partner' | 'joint';
+
+export type AssetType =
+  | 'cash'
+  | 'brokerage' // taxable investments
+  | 'retirementTaxDeferred' // 401k/403b/traditional IRA
+  | 'retirementRoth'
+  | 'hsa'
+  | '529'
+  | 'other';
+
+export type AssetAccount = {
+  id: string;        // stable key for add/remove
+  label: string;     // editable (e.g. "Checking", "Vanguard Brokerage", "401k")
+  type: AssetType;
+  owner: Owner;
+  balance: number;
+
+  // optional v1 fields (we won’t use them immediately, but they’re useful soon)
+  costBasis?: number; // only relevant for brokerage; can be omitted in v1
+};
+
+export type BalanceSheet = {
+  assets: AssetAccount[];
+
+  // Optional: include home in net worth if they own
+  home?: {
+    owner: Owner;       // often 'joint'
+    currentValue: number;
+  };
 };
