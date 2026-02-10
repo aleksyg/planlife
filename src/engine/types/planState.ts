@@ -59,7 +59,7 @@ export type PlanState = {
   household: Household;
 
   // Placeholder sections you said we’ll design next
-  expenses?: unknown;
+  expenses: Expenses;
   debt?: unknown;
   balanceSheet?: unknown;
 
@@ -70,3 +70,20 @@ export type PlanState = {
     cashRate: number; // e.g. 0.04
   };
 };
+
+export type ExpenseLineItem = {
+  id: string; // stable key for add/remove UI (e.g. crypto.randomUUID())
+  label: string; // editable category label
+  monthlyAmount: number;
+};
+
+export type Expenses =
+  | {
+      mode: 'total';
+      totalMonthly: number;
+    }
+  | {
+      mode: 'itemized';
+      items: ExpenseLineItem[];
+    };
+
