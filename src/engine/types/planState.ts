@@ -11,7 +11,8 @@ export type Housing =
     };
 
 export type Child = {
-  age: number; // v1: just age; later we can add childcare/college toggles etc
+    id: string; // stable key for add/remove UI (e.g. crypto.randomUUID())
+    age: number; // v1: just age; later we can add childcare/college toggles etc
 };
 
 export type RetirementPlan = {
