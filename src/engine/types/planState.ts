@@ -38,6 +38,8 @@ export type Income = {
   bonusAnnual?: number; // required if hasBonus
 
   retirement: RetirementPlan;
+  incomeGrowthRate: number; // e.g. 0.03
+
 };
 
 export type Person = {
