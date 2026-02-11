@@ -29,13 +29,14 @@ function getDebtMonthly(plan: PlanState): number {
   return plan.debt.reduce((sum, d) => sum + d.monthlyPayment, 0);
 }
 
-function getPersonGrossIncomeAtAge(personAgeNow: number, targetAge: number, income: { baseAnnual: number; hasBonus: boolean; bonusAnnual?: number; incomeGrowthRate: number }): number {
-  const yearsForward = targetAge - personAgeNow;
-  const growth = Math.pow(1 + income.incomeGrowthRate, Math.max(0, yearsForward));
-  const base = income.baseAnnual * growth;
-  const bonus = income.hasBonus ? (income.bonusAnnual ?? 0) * growth : 0;
-  return base + bonus;
+function getPersonGrossIncomeAtAge(
+  personAgeNow: number,
+  targetAge: number,
+  income: { baseAnnual: number; hasBonus: boolean; bonusAnnual?: number; incomeGrowthRate: number },
+): number {
+  return getPersonCompAtAge(personAgeNow, targetAge, income).grossAnnual;
 }
+
 
 function getHouseholdGrossIncomeAtAge(plan: PlanState, targetAge: number): number {
   const user = plan.household.user;
@@ -87,7 +88,11 @@ export function simulatePlan(plan: PlanState): YearRow[] {
     nonCashValue *= 1 + plan.assumptions.returnRate;
 
     // Route all savings into cash (can be negative)
-    cashValue += annualSavings;
+    const { total: retirementTotal } = getHouseholdRetirementContribAtAge(plan, age);
+    nonCashValue += retirementTotal;
+
+    // Remaining savings goes to cash (can be negative)
+    cashValue += annualSavings - retirementTotal;
 
     const endAssetValue = cashValue + nonCashValue;
     const endNetWorth = endAssetValue + homeValue - totalDebtBalance;
@@ -110,4 +115,75 @@ export function simulatePlan(plan: PlanState): YearRow[] {
   }
 
   return rows;
+}
+
+type CompAtAge = {
+  baseAnnual: number;
+  bonusAnnual: number;
+  grossAnnual: number;
+};
+
+function getPersonCompAtAge(
+  personAgeNow: number,
+  targetAge: number,
+  income: {
+    baseAnnual: number;
+    hasBonus: boolean;
+    bonusAnnual?: number;
+    incomeGrowthRate: number;
+  },
+): CompAtAge {
+  const yearsForward = targetAge - personAgeNow;
+  const growth = Math.pow(1 + income.incomeGrowthRate, Math.max(0, yearsForward));
+
+  const baseAnnual = income.baseAnnual * growth;
+  const bonusAnnual = income.hasBonus ? (income.bonusAnnual ?? 0) * growth : 0;
+
+  return {
+    baseAnnual,
+    bonusAnnual,
+    grossAnnual: baseAnnual + bonusAnnual,
+  };
+}
+
+function getPersonRetirementContribAtAge(person: Person, targetAge: number) {
+  const comp = getPersonCompAtAge(person.age, targetAge, person.income);
+
+  // v1: retirement contributions computed on BASE only
+  const retirement = person.income.retirement;
+  if (!retirement?.hasPlan) return { employee: 0, employer: 0, total: 0 };
+
+  const employeePct = (retirement.employeeContributionPct ?? 0) / 100;
+  const employee = comp.baseAnnual * employeePct;
+
+  let employer = 0;
+  if (retirement.hasEmployerMatch) {
+    const matchRate = (retirement.employerMatchPct ?? 0) / 100;
+    const upTo = (retirement.employerMatchUpToPct ?? 0) / 100;
+    const matchedPct = Math.min(employeePct, upTo);
+    employer = comp.baseAnnual * matchedPct * matchRate;
+  }
+
+  return { employee, employer, total: employee + employer };
+}
+
+function getHouseholdRetirementContribAtAge(plan: PlanState, targetAge: number) {
+  const userContrib = getPersonRetirementContribAtAge(plan.household.user, targetAge);
+
+  let partnerContrib = { employee: 0, employer: 0, total: 0 };
+  if (plan.household.hasPartner && plan.household.partner) {
+    // advance partner by same number of years as user advanced
+    const yearsForward = targetAge - plan.household.user.age;
+    const partnerAgeAtTarget = plan.household.partner.age + yearsForward;
+
+    // Create a "view" of partner with the advanced age for comp calc
+    const partnerAtAge: Person = { ...plan.household.partner, age: partnerAgeAtTarget };
+    partnerContrib = getPersonRetirementContribAtAge(partnerAtAge, partnerAgeAtTarget);
+  }
+
+  return {
+    employee: userContrib.employee + partnerContrib.employee,
+    employer: userContrib.employer + partnerContrib.employer,
+    total: userContrib.total + partnerContrib.total,
+  };
 }
