@@ -1,16 +1,21 @@
-import type { PlanState, Housing, Expenses } from './types/planState';
+import type { Expenses, Housing, Person, PlanState } from './types/planState';
 
 export type YearRow = {
   age: number;
   yearIndex: number;
 
   grossIncome: number;
+
   housingMonthly: number;
   debtMonthly: number;
   lifestyleMonthly: number;
 
   totalMonthlyOutflow: number;
   annualSavings: number;
+
+  employeeRetirementAnnual: number;
+  employerMatchAnnual: number;
+  retirementTotalAnnual: number;
 
   endAssetValue: number;
   endNetWorth: number;
@@ -27,94 +32,6 @@ function getLifestyleMonthly(expenses: Expenses): number {
 
 function getDebtMonthly(plan: PlanState): number {
   return plan.debt.reduce((sum, d) => sum + d.monthlyPayment, 0);
-}
-
-function getPersonGrossIncomeAtAge(
-  personAgeNow: number,
-  targetAge: number,
-  income: { baseAnnual: number; hasBonus: boolean; bonusAnnual?: number; incomeGrowthRate: number },
-): number {
-  return getPersonCompAtAge(personAgeNow, targetAge, income).grossAnnual;
-}
-
-
-function getHouseholdGrossIncomeAtAge(plan: PlanState, targetAge: number): number {
-  const user = plan.household.user;
-  let total = getPersonGrossIncomeAtAge(user.age, targetAge, user.income);
-
-  if (plan.household.hasPartner && plan.household.partner) {
-    const partner = plan.household.partner;
-    total += getPersonGrossIncomeAtAge(partner.age, partner.age + (targetAge - user.age), partner.income);
-    // Explanation: we advance partner age by the same number of years as the user's age advancement.
-  }
-
-  return total;
-}
-
-export function simulatePlan(plan: PlanState): YearRow[] {
-  const rows: YearRow[] = [];
-
-  const lifestyleMonthly = getLifestyleMonthly(plan.expenses);
-  const housingMonthly = getHousingMonthly(plan.household.housing);
-  const debtMonthly = getDebtMonthly(plan);
-
-  const totalMonthlyOutflow = lifestyleMonthly + housingMonthly + debtMonthly;
-  const annualOutflow = totalMonthlyOutflow * 12;
-
-  const homeValue = plan.balanceSheet.home.currentValue;
-  const totalDebtBalance = plan.debt.reduce((sum, d) => sum + d.balance, 0);
-
-  // Step 3A: track cash vs non-cash totals (we'll break out accounts later)
-  let cashValue = plan.balanceSheet.assets
-    .filter((a) => a.type === 'cash')
-    .reduce((sum, a) => sum + a.balance, 0);
-
-  let nonCashValue = plan.balanceSheet.assets
-    .filter((a) => a.type !== 'cash')
-    .reduce((sum, a) => sum + a.balance, 0);
-
-  const years = plan.endAge - plan.startAge + 1;
-
-  for (let i = 0; i < years; i++) {
-    const age = plan.startAge + i;
-
-    const grossIncome = getHouseholdGrossIncomeAtAge(plan, age);
-
-    // v1: still no taxes, no retirement contribution logic yet
-    const annualSavings = grossIncome - annualOutflow;
-
-    // Apply returns to starting balances for the year
-    cashValue *= 1 + plan.assumptions.cashRate;
-    nonCashValue *= 1 + plan.assumptions.returnRate;
-
-    // Route all savings into cash (can be negative)
-    const { total: retirementTotal } = getHouseholdRetirementContribAtAge(plan, age);
-    nonCashValue += retirementTotal;
-
-    // Remaining savings goes to cash (can be negative)
-    cashValue += annualSavings - retirementTotal;
-
-    const endAssetValue = cashValue + nonCashValue;
-    const endNetWorth = endAssetValue + homeValue - totalDebtBalance;
-
-    rows.push({
-      age,
-      yearIndex: i,
-
-      grossIncome,
-      housingMonthly,
-      debtMonthly,
-      lifestyleMonthly,
-
-      totalMonthlyOutflow,
-      annualSavings,
-
-      endAssetValue,
-      endNetWorth,
-    });
-  }
-
-  return rows;
 }
 
 type CompAtAge = {
@@ -146,6 +63,31 @@ function getPersonCompAtAge(
   };
 }
 
+function getPersonGrossIncomeAtAge(
+  personAgeNow: number,
+  targetAge: number,
+  income: { baseAnnual: number; hasBonus: boolean; bonusAnnual?: number; incomeGrowthRate: number },
+): number {
+  return getPersonCompAtAge(personAgeNow, targetAge, income).grossAnnual;
+}
+
+function getHouseholdGrossIncomeAtAge(plan: PlanState, targetAge: number): number {
+  const user = plan.household.user;
+  let total = getPersonGrossIncomeAtAge(user.age, targetAge, user.income);
+
+  if (plan.household.hasPartner && plan.household.partner) {
+    const yearsForward = targetAge - user.age;
+    const partnerAgeAtTarget = plan.household.partner.age + yearsForward;
+    total += getPersonGrossIncomeAtAge(
+      plan.household.partner.age,
+      partnerAgeAtTarget,
+      plan.household.partner.income,
+    );
+  }
+
+  return total;
+}
+
 function getPersonRetirementContribAtAge(person: Person, targetAge: number) {
   const comp = getPersonCompAtAge(person.age, targetAge, person.income);
 
@@ -172,11 +114,10 @@ function getHouseholdRetirementContribAtAge(plan: PlanState, targetAge: number) 
 
   let partnerContrib = { employee: 0, employer: 0, total: 0 };
   if (plan.household.hasPartner && plan.household.partner) {
-    // advance partner by same number of years as user advanced
     const yearsForward = targetAge - plan.household.user.age;
     const partnerAgeAtTarget = plan.household.partner.age + yearsForward;
 
-    // Create a "view" of partner with the advanced age for comp calc
+    // Compute partner contributions at their age in that same year
     const partnerAtAge: Person = { ...plan.household.partner, age: partnerAgeAtTarget };
     partnerContrib = getPersonRetirementContribAtAge(partnerAtAge, partnerAgeAtTarget);
   }
@@ -186,4 +127,73 @@ function getHouseholdRetirementContribAtAge(plan: PlanState, targetAge: number) 
     employer: userContrib.employer + partnerContrib.employer,
     total: userContrib.total + partnerContrib.total,
   };
+}
+
+export function simulatePlan(plan: PlanState): YearRow[] {
+  const rows: YearRow[] = [];
+
+  const lifestyleMonthly = getLifestyleMonthly(plan.expenses);
+  const housingMonthly = getHousingMonthly(plan.household.housing);
+  const debtMonthly = getDebtMonthly(plan);
+
+  const totalMonthlyOutflow = lifestyleMonthly + housingMonthly + debtMonthly;
+  const annualOutflow = totalMonthlyOutflow * 12;
+
+  const homeValue = plan.balanceSheet.home.currentValue;
+  const totalDebtBalance = plan.debt.reduce((sum, d) => sum + d.balance, 0);
+
+  // Step 3A: track cash vs non-cash totals
+  let cashValue = plan.balanceSheet.assets
+    .filter((a) => a.type === 'cash')
+    .reduce((sum, a) => sum + a.balance, 0);
+
+  let nonCashValue = plan.balanceSheet.assets
+    .filter((a) => a.type !== 'cash')
+    .reduce((sum, a) => sum + a.balance, 0);
+
+  const years = plan.endAge - plan.startAge + 1;
+
+  for (let i = 0; i < years; i++) {
+    const age = plan.startAge + i;
+
+    const grossIncome = getHouseholdGrossIncomeAtAge(plan, age);
+    const annualSavings = grossIncome - annualOutflow;
+
+    // Apply returns
+    cashValue *= 1 + plan.assumptions.cashRate;
+    nonCashValue *= 1 + plan.assumptions.returnRate;
+
+    // Retirement contributions + match (allocation of savings, match is extra money)
+    const retirement = getHouseholdRetirementContribAtAge(plan, age);
+    nonCashValue += retirement.total;
+
+    // Remaining savings goes to cash (can be negative)
+    cashValue += annualSavings - retirement.total;
+
+    const endAssetValue = cashValue + nonCashValue;
+    const endNetWorth = endAssetValue + homeValue - totalDebtBalance;
+
+    rows.push({
+      age,
+      yearIndex: i,
+
+      grossIncome,
+
+      housingMonthly,
+      debtMonthly,
+      lifestyleMonthly,
+
+      totalMonthlyOutflow,
+      annualSavings,
+
+      employeeRetirementAnnual: retirement.employee,
+      employerMatchAnnual: retirement.employer,
+      retirementTotalAnnual: retirement.total,
+
+      endAssetValue,
+      endNetWorth,
+    });
+  }
+
+  return rows;
 }
