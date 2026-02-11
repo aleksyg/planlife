@@ -1,3 +1,18 @@
+Overview:
+Repo: C:\Users\aleks\planlife
+
+Stack: Next.js + TS
+
+Current files:
+
+src/engine/types/planState.ts (v1 schema: household/income/expenses/debt/balanceSheet/home, asOfYearMonth)
+
+src/engine/simulatePlan.ts (cashflow + returns + retirement match; outputs YearRow incl retirement fields)
+
+src/engine/utils/debt.ts (suggested payment helper)
+
+Next task: debt amortization
+
 PROJECT: Planlife
 STACK: Next.js + TypeScript
 FOCUS: Engine-first lifetime financial projection (v1)
