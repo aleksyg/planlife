@@ -14,6 +14,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import type { AiResponse } from "@/ai/types";
+import { applyAiActions } from "@/ai/applyActions";
+import { buildAiPromptPayload } from "@/ai/promptPayload";
 
 function formatCurrency(n: number): string {
   return new Intl.NumberFormat("en-US", {
@@ -37,6 +40,12 @@ export default function ResultsPage() {
     const rows = simulatePlan(plan);
     return [plan, rows];
   }, []);
+
+  const [aiPrompt, setAiPrompt] = useState("");
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [aiResponse, setAiResponse] = useState<AiResponse | null>(null);
+  const [aiApplied, setAiApplied] = useState<AiResponse | null>(null);
 
   const [scenarioYearIndex, setScenarioYearIndex] = useState<string>("none");
   const scenarioRows = useMemo(() => {
@@ -65,6 +74,23 @@ export default function ResultsPage() {
       ? (baselinePlan ? baselinePlan.startAge + retirementProxyScenario - (baselinePlan.startAge + retirementProxyBaseline) : null)
       : null;
 
+  const aiPreview = useMemo(() => {
+    if (!baselinePlan || !aiResponse || aiResponse.actions.length === 0) return null;
+    try {
+      const applied = applyAiActions(baselinePlan, aiResponse.actions);
+      const rows = simulatePlan(applied.plan, applied.options);
+      return { applied, rows };
+    } catch (e: any) {
+      return { error: e?.message ?? String(e) } as const;
+    }
+  }, [baselinePlan, aiResponse]);
+
+  const aiAppliedRows = useMemo(() => {
+    if (!baselinePlan || !aiApplied || aiApplied.actions.length === 0) return null;
+    const applied = applyAiActions(baselinePlan, aiApplied.actions);
+    return simulatePlan(applied.plan, applied.options);
+  }, [baselinePlan, aiApplied]);
+
   if (!baselinePlan) {
     return (
       <div className="min-h-screen bg-background px-4 py-10">
@@ -76,6 +102,28 @@ export default function ResultsPage() {
         </div>
       </div>
     );
+  }
+
+  async function handleAiPropose() {
+    setAiLoading(true);
+    setAiError(null);
+    setAiResponse(null);
+    try {
+      if (!baselinePlan) throw new Error("No baseline plan loaded.");
+      const context = buildAiPromptPayload(baselinePlan, baselineRows);
+      const res = await fetch("/api/ai", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ prompt: aiPrompt, context }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error ?? "AI request failed.");
+      setAiResponse(json as AiResponse);
+    } catch (e: any) {
+      setAiError(e?.message ?? String(e));
+    } finally {
+      setAiLoading(false);
+    }
   }
 
   return (
@@ -185,6 +233,135 @@ export default function ResultsPage() {
             </CardContent>
           </Card>
         </div>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>AI Assistant (v0)</CardTitle>
+            <CardDescription>
+              Describe a change in plain English. We’ll preview the structured actions and the impact before applying.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Prompt</label>
+              <textarea
+                className="min-h-24 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                placeholder='e.g. "Set state tax to 6% and quit partner job starting in year 2"'
+                value={aiPrompt}
+                onChange={(e) => setAiPrompt(e.target.value)}
+              />
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                onClick={handleAiPropose}
+                disabled={aiLoading || aiPrompt.trim().length === 0}
+              >
+                {aiLoading ? "Proposing..." : "Propose changes"}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setAiPrompt("");
+                  setAiError(null);
+                  setAiResponse(null);
+                }}
+              >
+                Clear
+              </Button>
+              {aiResponse?.actions?.length ? (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => setAiApplied(aiResponse)}
+                >
+                  Apply
+                </Button>
+              ) : null}
+              {aiApplied ? (
+                <Button type="button" variant="ghost" onClick={() => setAiApplied(null)}>
+                  Clear applied
+                </Button>
+              ) : null}
+            </div>
+
+            {aiError && (
+              <div className="rounded-md border border-destructive/50 bg-destructive/10 px-4 py-2 text-sm text-destructive">
+                {aiError}
+              </div>
+            )}
+
+            {aiResponse && (
+              <div className="space-y-3">
+                {aiResponse.notes?.length ? (
+                  <div className="rounded-md border border-border bg-muted/20 px-4 py-2 text-sm">
+                    <p className="font-medium">Notes</p>
+                    <ul className="mt-1 list-disc pl-5">
+                      {aiResponse.notes.map((n, idx) => (
+                        <li key={idx}>{n}</li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+
+                <div className="rounded-md border border-border bg-muted/10 p-3">
+                  <p className="mb-2 text-sm font-medium">Proposed actions (JSON)</p>
+                  <pre className="max-h-64 overflow-auto text-xs">
+                    {JSON.stringify(aiResponse.actions, null, 2)}
+                  </pre>
+                </div>
+
+                {aiPreview && "rows" in aiPreview && aiPreview.rows ? (
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="rounded-lg border border-border bg-muted/30 p-4">
+                      <p className="text-muted-foreground text-sm">
+                        Age {lastRow?.age ?? "—"} net worth (preview)
+                      </p>
+                      <div className="mt-2 space-y-1 text-sm">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-muted-foreground">Baseline</span>
+                          <span className="tabular-nums">
+                            {lastRow != null ? formatCurrency(lastRow.endNetWorth) : "—"}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-muted-foreground">Scenario</span>
+                          <span className="tabular-nums">
+                            {aiPreview.rows[aiPreview.rows.length - 1] != null
+                              ? formatCurrency(aiPreview.rows[aiPreview.rows.length - 1].endNetWorth)
+                              : "—"}
+                          </span>
+                        </div>
+                      </div>
+                      {lastRow && aiPreview.rows.length ? (
+                        <p className="mt-2 text-xl font-semibold">
+                          Delta:{" "}
+                          {formatCurrency(
+                            aiPreview.rows[aiPreview.rows.length - 1].endNetWorth - lastRow.endNetWorth
+                          )}
+                        </p>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : aiPreview && "error" in aiPreview ? (
+                  <div className="rounded-md border border-destructive/50 bg-destructive/10 px-4 py-2 text-sm text-destructive">
+                    {aiPreview.error}
+                  </div>
+                ) : null}
+              </div>
+            )}
+
+            {aiAppliedRows ? (
+              <div className="rounded-md border border-border bg-muted/10 p-3 text-sm">
+                <p className="font-medium">AI scenario applied (this page only)</p>
+                <p className="text-muted-foreground text-xs">
+                  Baseline in localStorage is unchanged. Clear applied to revert.
+                </p>
+              </div>
+            ) : null}
+          </CardContent>
+        </Card>
 
         <Card>
           <CardHeader>

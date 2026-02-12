@@ -32,7 +32,9 @@ export function buildPlanStateFromForm(form: BaselineFormState): PlanState {
       hasPlan: form.userHasRetirement ?? false,
       employeePreTaxContributionPct: form.userRetirementPreTaxPct ?? 0,
       employeeRothContributionPct: form.userRetirementRothPct ?? 0,
-      hasEmployerMatch: false,
+      hasEmployerMatch: form.userHasEmployerMatch ?? false,
+      employerMatchPct: form.userEmployerMatchPct ?? 0,
+      employerMatchUpToPct: form.userEmployerMatchUpToPct ?? 0,
     },
   };
 
@@ -45,7 +47,9 @@ export function buildPlanStateFromForm(form: BaselineFormState): PlanState {
       hasPlan: form.partnerHasRetirement ?? false,
       employeePreTaxContributionPct: form.partnerRetirementPreTaxPct ?? 0,
       employeeRothContributionPct: form.partnerRetirementRothPct ?? 0,
-      hasEmployerMatch: false,
+      hasEmployerMatch: form.partnerHasEmployerMatch ?? false,
+      employerMatchPct: form.partnerEmployerMatchPct ?? 0,
+      employerMatchUpToPct: form.partnerEmployerMatchUpToPct ?? 0,
     },
   };
 
@@ -123,12 +127,18 @@ export type BaselineFormState = {
   userHasRetirement?: boolean;
   userRetirementPreTaxPct?: number;
   userRetirementRothPct?: number;
+  userHasEmployerMatch?: boolean;
+  userEmployerMatchPct?: number;
+  userEmployerMatchUpToPct?: number;
   userPreTaxDeductionsMonthly?: number;
   hasPartner?: boolean;
   partnerBaseAnnual?: number;
   partnerHasRetirement?: boolean;
   partnerRetirementPreTaxPct?: number;
   partnerRetirementRothPct?: number;
+  partnerHasEmployerMatch?: boolean;
+  partnerEmployerMatchPct?: number;
+  partnerEmployerMatchUpToPct?: number;
   partnerPreTaxDeductionsMonthly?: number;
   filingStatus?: "single" | "marriedJoint";
   lifestyleMonthly?: number;
@@ -185,12 +195,24 @@ export function validateBaselineForm(form: BaselineFormState): string | null {
     const roth = form.userRetirementRothPct ?? 0;
     if (pre < 0 || roth < 0) return "User retirement contribution % must be >= 0.";
     if (pre + roth > 100) return "User retirement pre-tax % + Roth % must be <= 100.";
+    if (form.userHasEmployerMatch) {
+      const matchPct = form.userEmployerMatchPct ?? 0;
+      const upToPct = form.userEmployerMatchUpToPct ?? 0;
+      if (matchPct < 0 || matchPct > 100) return "User employer match % must be between 0 and 100.";
+      if (upToPct < 0 || upToPct > 100) return "User employer match up-to % must be between 0 and 100.";
+    }
   }
   if (form.hasPartner && form.partnerHasRetirement) {
     const pre = form.partnerRetirementPreTaxPct ?? 0;
     const roth = form.partnerRetirementRothPct ?? 0;
     if (pre < 0 || roth < 0) return "Partner retirement contribution % must be >= 0.";
     if (pre + roth > 100) return "Partner retirement pre-tax % + Roth % must be <= 100.";
+    if (form.partnerHasEmployerMatch) {
+      const matchPct = form.partnerEmployerMatchPct ?? 0;
+      const upToPct = form.partnerEmployerMatchUpToPct ?? 0;
+      if (matchPct < 0 || matchPct > 100) return "Partner employer match % must be between 0 and 100.";
+      if (upToPct < 0 || upToPct > 100) return "Partner employer match up-to % must be between 0 and 100.";
+    }
   }
   const cash = form.assetsCash ?? 0;
   const inv = form.assetsInvestments ?? 0;
@@ -203,47 +225,84 @@ export function loadBaselineFromStorage(): PlanState | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as any;
+
+    const isRecord = (x: unknown): x is Record<string, unknown> => typeof x === "object" && x !== null;
+    const ensureRecord = (obj: Record<string, unknown>, key: string): Record<string, unknown> => {
+      const v = obj[key];
+      if (isRecord(v)) return v;
+      const created: Record<string, unknown> = {};
+      obj[key] = created;
+      return created;
+    };
+    const ensureNumber = (obj: Record<string, unknown>, key: string, fallback: number): number => {
+      const v = obj[key];
+      if (typeof v === "number" && Number.isFinite(v)) return v;
+      obj[key] = fallback;
+      return fallback;
+    };
+    const ensureBoolean = (obj: Record<string, unknown>, key: string, fallback: boolean): boolean => {
+      const v = obj[key];
+      if (typeof v === "boolean") return v;
+      obj[key] = fallback;
+      return fallback;
+    };
+
+    const parsedUnknown = JSON.parse(raw) as unknown;
+    if (!isRecord(parsedUnknown)) return null;
+    const parsed = parsedUnknown;
 
     // Lightweight migration for older saved plans.
-    parsed.assumptions = parsed.assumptions ?? {};
-    if (parsed.assumptions.flatTaxRate == null) parsed.assumptions.flatTaxRate = 0.3;
-    if (parsed.assumptions.stateTaxRate == null) parsed.assumptions.stateTaxRate = 0;
+    const assumptions = ensureRecord(parsed, "assumptions");
+    ensureNumber(assumptions, "inflationRate", 0.025);
+    ensureNumber(assumptions, "returnRate", 0.07);
+    ensureNumber(assumptions, "cashRate", 0.04);
+    ensureNumber(assumptions, "flatTaxRate", 0.3);
+    ensureNumber(assumptions, "stateTaxRate", 0);
 
-    const userRet = parsed.household?.user?.income?.retirement;
+    const household = ensureRecord(parsed, "household");
+    const user = ensureRecord(household, "user");
+    const userIncome = ensureRecord(user, "income");
+    const userRet = ensureRecord(userIncome, "retirement");
     if (userRet) {
       // If an old single % exists, treat it as pre-tax.
-      if (userRet.employeePreTaxContributionPct == null && userRet.employeeContributionPct != null) {
-        userRet.employeePreTaxContributionPct = userRet.employeeContributionPct;
+      const legacyPct = userRet["employeeContributionPct"];
+      if (userRet["employeePreTaxContributionPct"] == null && typeof legacyPct === "number") {
+        userRet["employeePreTaxContributionPct"] = legacyPct;
       }
-      if (userRet.employeeRothContributionPct == null) userRet.employeeRothContributionPct = 0;
-      delete userRet.employeeContributionPct;
+      ensureNumber(userRet, "employeeRothContributionPct", 0);
+      ensureBoolean(userRet, "hasEmployerMatch", false);
+      ensureNumber(userRet, "employerMatchPct", 0);
+      ensureNumber(userRet, "employerMatchUpToPct", 0);
+      delete userRet["employeeContributionPct"];
     }
 
-    const partnerRet = parsed.household?.partner?.income?.retirement;
-    if (partnerRet) {
-      if (
-        partnerRet.employeePreTaxContributionPct == null &&
-        partnerRet.employeeContributionPct != null
-      ) {
-        partnerRet.employeePreTaxContributionPct = partnerRet.employeeContributionPct;
+    const hasPartner = typeof household["hasPartner"] === "boolean" ? household["hasPartner"] : false;
+    if (hasPartner) {
+      const partner = ensureRecord(household, "partner");
+      const partnerIncome = ensureRecord(partner, "income");
+      const partnerRet = ensureRecord(partnerIncome, "retirement");
+      const legacyPct = partnerRet["employeeContributionPct"];
+      if (partnerRet["employeePreTaxContributionPct"] == null && typeof legacyPct === "number") {
+        partnerRet["employeePreTaxContributionPct"] = legacyPct;
       }
-      if (partnerRet.employeeRothContributionPct == null) partnerRet.employeeRothContributionPct = 0;
-      delete partnerRet.employeeContributionPct;
+      ensureNumber(partnerRet, "employeeRothContributionPct", 0);
+      ensureBoolean(partnerRet, "hasEmployerMatch", false);
+      ensureNumber(partnerRet, "employerMatchPct", 0);
+      ensureNumber(partnerRet, "employerMatchUpToPct", 0);
+      delete partnerRet["employeeContributionPct"];
     }
 
     // Defaults/migration for new tax + deductions fields.
-    if (parsed.household?.tax?.filingStatus == null) {
-      parsed.household = parsed.household ?? {};
-      parsed.household.tax = {
-        filingStatus: parsed.household.hasPartner ? "marriedJoint" : "single",
-      };
+    const tax = ensureRecord(household, "tax");
+    if (tax["filingStatus"] !== "single" && tax["filingStatus"] !== "marriedJoint") {
+      tax["filingStatus"] = hasPartner ? "marriedJoint" : "single";
     }
-    if (parsed.household?.user?.income && parsed.household.user.income.preTaxDeductionsMonthly == null) {
-      parsed.household.user.income.preTaxDeductionsMonthly = 0;
-    }
-    if (parsed.household?.partner?.income && parsed.household.partner.income.preTaxDeductionsMonthly == null) {
-      parsed.household.partner.income.preTaxDeductionsMonthly = 0;
+
+    ensureNumber(userIncome, "preTaxDeductionsMonthly", 0);
+    if (hasPartner) {
+      const partner = ensureRecord(household, "partner");
+      const partnerIncome = ensureRecord(partner, "income");
+      ensureNumber(partnerIncome, "preTaxDeductionsMonthly", 0);
     }
 
     return parsed as PlanState;
@@ -273,12 +332,18 @@ export function getDefaultFormState(): BaselineFormState {
     userHasRetirement: true,
     userRetirementPreTaxPct: 10,
     userRetirementRothPct: 0,
+    userHasEmployerMatch: false,
+    userEmployerMatchPct: 50,
+    userEmployerMatchUpToPct: 6,
     userPreTaxDeductionsMonthly: 0,
     hasPartner: false,
     partnerBaseAnnual: 0,
     partnerHasRetirement: false,
     partnerRetirementPreTaxPct: 0,
     partnerRetirementRothPct: 0,
+    partnerHasEmployerMatch: false,
+    partnerEmployerMatchPct: 50,
+    partnerEmployerMatchUpToPct: 6,
     partnerPreTaxDeductionsMonthly: 0,
     filingStatus: "single",
     lifestyleMonthly: 4_000,

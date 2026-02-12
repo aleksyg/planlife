@@ -20,6 +20,18 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
+## AI Assistant (v0)
+
+The `/results` page includes a minimal AI panel backed by OpenAI.
+
+Create a local env file at `.env.local` (do not commit it):
+
+```bash
+OPENAI_API_KEY=...
+# optional (defaults to gpt-4o)
+OPENAI_MODEL=gpt-4o
+```
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:

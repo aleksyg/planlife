@@ -38,6 +38,9 @@ function useStoredFormState(): [BaselineFormState, import("./planStateStorage").
           stored.household.user.income.retirement?.employeePreTaxContributionPct ?? 0,
         userRetirementRothPct:
           stored.household.user.income.retirement?.employeeRothContributionPct ?? 0,
+        userHasEmployerMatch: stored.household.user.income.retirement?.hasEmployerMatch ?? false,
+        userEmployerMatchPct: stored.household.user.income.retirement?.employerMatchPct ?? 0,
+        userEmployerMatchUpToPct: stored.household.user.income.retirement?.employerMatchUpToPct ?? 0,
         hasPartner: stored.household.hasPartner,
         partnerBaseAnnual: stored.household.partner?.income.baseAnnual ?? 0,
         partnerHasRetirement: stored.household.partner?.income.retirement?.hasPlan ?? false,
@@ -45,6 +48,12 @@ function useStoredFormState(): [BaselineFormState, import("./planStateStorage").
           stored.household.partner?.income.retirement?.employeePreTaxContributionPct ?? 0,
         partnerRetirementRothPct:
           stored.household.partner?.income.retirement?.employeeRothContributionPct ?? 0,
+        partnerHasEmployerMatch:
+          stored.household.partner?.income.retirement?.hasEmployerMatch ?? false,
+        partnerEmployerMatchPct:
+          stored.household.partner?.income.retirement?.employerMatchPct ?? 0,
+        partnerEmployerMatchUpToPct:
+          stored.household.partner?.income.retirement?.employerMatchUpToPct ?? 0,
         userPreTaxDeductionsMonthly: stored.household.user.income.preTaxDeductionsMonthly ?? 0,
         partnerPreTaxDeductionsMonthly:
           stored.household.partner?.income.preTaxDeductionsMonthly ?? 0,
@@ -170,35 +179,84 @@ export default function BaselineInputsPage() {
                 />
               </div>
               {form.userHasRetirement && (
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="userRetirementPreTaxPct">Pre-tax %</Label>
-                    <Input
-                      id="userRetirementPreTaxPct"
-                      type="number"
-                      min={0}
-                      max={100}
-                      step={0.5}
-                      value={form.userRetirementPreTaxPct ?? ""}
-                      onChange={(e) =>
-                        update("userRetirementPreTaxPct", parseNum(e.target.value))
-                      }
+                <div className="space-y-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="userRetirementPreTaxPct">Pre-tax %</Label>
+                      <Input
+                        id="userRetirementPreTaxPct"
+                        type="number"
+                        min={0}
+                        max={100}
+                        step={0.5}
+                        value={form.userRetirementPreTaxPct ?? ""}
+                        onChange={(e) =>
+                          update("userRetirementPreTaxPct", parseNum(e.target.value))
+                        }
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="userRetirementRothPct">Roth %</Label>
+                      <Input
+                        id="userRetirementRothPct"
+                        type="number"
+                        min={0}
+                        max={100}
+                        step={0.5}
+                        value={form.userRetirementRothPct ?? ""}
+                        onChange={(e) =>
+                          update("userRetirementRothPct", parseNum(e.target.value))
+                        }
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <Label>Employer match</Label>
+                      <p className="text-muted-foreground text-xs">
+                        Match % is applied to total employee % (pre-tax + Roth)
+                      </p>
+                    </div>
+                    <Switch
+                      checked={form.userHasEmployerMatch ?? false}
+                      onCheckedChange={(v) => update("userHasEmployerMatch", v)}
                     />
                   </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="userRetirementRothPct">Roth %</Label>
-                    <Input
-                      id="userRetirementRothPct"
-                      type="number"
-                      min={0}
-                      max={100}
-                      step={0.5}
-                      value={form.userRetirementRothPct ?? ""}
-                      onChange={(e) =>
-                        update("userRetirementRothPct", parseNum(e.target.value))
-                      }
-                    />
-                  </div>
+
+                  {form.userHasEmployerMatch && (
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="userEmployerMatchPct">Match % (e.g. 50 = 50%)</Label>
+                        <Input
+                          id="userEmployerMatchPct"
+                          type="number"
+                          min={0}
+                          max={100}
+                          step={1}
+                          value={form.userEmployerMatchPct ?? ""}
+                          onChange={(e) =>
+                            update("userEmployerMatchPct", parseNum(e.target.value))
+                          }
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="userEmployerMatchUpToPct">Up to % of pay (e.g. 6)</Label>
+                        <Input
+                          id="userEmployerMatchUpToPct"
+                          type="number"
+                          min={0}
+                          max={100}
+                          step={0.5}
+                          value={form.userEmployerMatchUpToPct ?? ""}
+                          onChange={(e) =>
+                            update("userEmployerMatchUpToPct", parseNum(e.target.value))
+                          }
+                        />
+                      </div>
+                    </div>
+                  )}
+
                 </div>
               )}
               <div className="space-y-2">
@@ -316,35 +374,83 @@ export default function BaselineInputsPage() {
                   </div>
 
                   {form.partnerHasRetirement && (
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <Label htmlFor="partnerRetirementPreTaxPct">Pre-tax %</Label>
-                        <Input
-                          id="partnerRetirementPreTaxPct"
-                          type="number"
-                          min={0}
-                          max={100}
-                          step={0.5}
-                          value={form.partnerRetirementPreTaxPct ?? ""}
-                          onChange={(e) =>
-                            update("partnerRetirementPreTaxPct", parseNum(e.target.value))
-                          }
+                    <div className="space-y-4">
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <Label htmlFor="partnerRetirementPreTaxPct">Pre-tax %</Label>
+                          <Input
+                            id="partnerRetirementPreTaxPct"
+                            type="number"
+                            min={0}
+                            max={100}
+                            step={0.5}
+                            value={form.partnerRetirementPreTaxPct ?? ""}
+                            onChange={(e) =>
+                              update("partnerRetirementPreTaxPct", parseNum(e.target.value))
+                            }
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="partnerRetirementRothPct">Roth %</Label>
+                          <Input
+                            id="partnerRetirementRothPct"
+                            type="number"
+                            min={0}
+                            max={100}
+                            step={0.5}
+                            value={form.partnerRetirementRothPct ?? ""}
+                            onChange={(e) =>
+                              update("partnerRetirementRothPct", parseNum(e.target.value))
+                            }
+                          />
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <Label>Partner employer match</Label>
+                          <p className="text-muted-foreground text-xs">
+                            Match checks total employee % (pre-tax + Roth)
+                          </p>
+                        </div>
+                        <Switch
+                          checked={form.partnerHasEmployerMatch ?? false}
+                          onCheckedChange={(v) => update("partnerHasEmployerMatch", v)}
                         />
                       </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="partnerRetirementRothPct">Roth %</Label>
-                        <Input
-                          id="partnerRetirementRothPct"
-                          type="number"
-                          min={0}
-                          max={100}
-                          step={0.5}
-                          value={form.partnerRetirementRothPct ?? ""}
-                          onChange={(e) =>
-                            update("partnerRetirementRothPct", parseNum(e.target.value))
-                          }
-                        />
-                      </div>
+
+                      {form.partnerHasEmployerMatch && (
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="space-y-2">
+                            <Label htmlFor="partnerEmployerMatchPct">Match %</Label>
+                            <Input
+                              id="partnerEmployerMatchPct"
+                              type="number"
+                              min={0}
+                              max={100}
+                              step={1}
+                              value={form.partnerEmployerMatchPct ?? ""}
+                              onChange={(e) =>
+                                update("partnerEmployerMatchPct", parseNum(e.target.value))
+                              }
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="partnerEmployerMatchUpToPct">Up to % of pay</Label>
+                            <Input
+                              id="partnerEmployerMatchUpToPct"
+                              type="number"
+                              min={0}
+                              max={100}
+                              step={0.5}
+                              value={form.partnerEmployerMatchUpToPct ?? ""}
+                              onChange={(e) =>
+                                update("partnerEmployerMatchUpToPct", parseNum(e.target.value))
+                              }
+                            />
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
 
