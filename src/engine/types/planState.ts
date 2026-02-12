@@ -21,10 +21,14 @@ export type Child = {
   age: number;
 };
 
+// ---------- Taxes (v1 placeholders) ----------
+export type TaxFilingStatus = 'single' | 'marriedJoint';
+
 // ---------- Income ----------
 export type RetirementPlan = {
   hasPlan: boolean; // 401k/403b/etc
-  employeeContributionPct?: number; // 0–100, required if hasPlan
+  employeePreTaxContributionPct?: number; // 0–100, required if hasPlan
+  employeeRothContributionPct?: number; // 0–100, required if hasPlan
 
   hasEmployerMatch?: boolean;
   employerMatchPct?: number; // e.g. 50 means "50% match"
@@ -36,6 +40,12 @@ export type Income = {
 
   hasBonus: boolean;
   bonusAnnual?: number; // required if hasBonus
+
+  /**
+   * Pre-tax payroll deductions (monthly), e.g. health/vision/dental, commuter benefits.
+   * These reduce BOTH federal taxable income and FICA wages (v1 assumption).
+   */
+  preTaxDeductionsMonthly: number;
 
   retirement: RetirementPlan;
   incomeGrowthRate: number; // e.g. 0.03
@@ -52,6 +62,10 @@ export type Household = {
 
   hasPartner: boolean;
   partner?: Person; // required if hasPartner
+
+  tax: {
+    filingStatus: TaxFilingStatus;
+  };
 
   hasChildren: boolean;
   children?: Child[]; // add/remove
@@ -156,5 +170,7 @@ export type PlanState = {
     inflationRate: number; // e.g. 0.025
     returnRate: number; // e.g. 0.07
     cashRate: number; // e.g. 0.04
+    flatTaxRate: number; // placeholder (e.g. 0.30)
+    stateTaxRate: number; // placeholder (e.g. 0.05)
   };
 };
