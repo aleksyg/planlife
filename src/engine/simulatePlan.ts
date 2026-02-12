@@ -256,6 +256,13 @@ function getHouseholdRetirementContribAtAge(
 export type SimulatePlanOptions = {
   /** From this year index onward, partner income and retirement contrib are treated as 0. */
   partnerZeroIncomeFromYearIndex?: number;
+
+  /**
+   * From this year index onward, override housing monthly as rent.
+   * Useful for time-based scenarios without mutating the baseline PlanState.
+   */
+  housingMonthlyRentFromYearIndex?: number;
+  housingMonthlyRentOverride?: number;
 };
 
 export function simulatePlan(plan: PlanState, options?: SimulatePlanOptions): YearRow[] {
@@ -263,11 +270,11 @@ export function simulatePlan(plan: PlanState, options?: SimulatePlanOptions): Ye
   const partnerZeroFromYearIndex = options?.partnerZeroIncomeFromYearIndex;
 
   const lifestyleMonthly = getLifestyleMonthly(plan.expenses);
-  const housingMonthly = getHousingMonthly(plan.household.housing);
+  const baselineHousingMonthly = getHousingMonthly(plan.household.housing);
   const debtMonthly = getDebtMonthly(plan);
 
-  const totalMonthlyOutflow = lifestyleMonthly + housingMonthly + debtMonthly;
-  const annualOutflow = totalMonthlyOutflow * 12;
+  const housingOverrideFromYearIndex = options?.housingMonthlyRentFromYearIndex;
+  const housingOverrideMonthly = options?.housingMonthlyRentOverride;
 
   const homeValue = plan.balanceSheet.home.currentValue;
 
@@ -298,6 +305,15 @@ export function simulatePlan(plan: PlanState, options?: SimulatePlanOptions): Ye
   for (let i = 0; i < years; i++) {
     const age = plan.startAge + i;
     if (incomeOpts) incomeOpts.yearIndex = i;
+
+    const housingMonthly =
+      housingOverrideFromYearIndex !== undefined &&
+      housingOverrideMonthly !== undefined &&
+      i >= housingOverrideFromYearIndex
+        ? housingOverrideMonthly
+        : baselineHousingMonthly;
+    const totalMonthlyOutflow = lifestyleMonthly + housingMonthly + debtMonthly;
+    const annualOutflow = totalMonthlyOutflow * 12;
 
     // Amortize debts for 12 months (monthly inner loop).
     // Runs before cashflow; both use same scheduled payments. When we stop payments mid-year,

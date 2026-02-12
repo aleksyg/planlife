@@ -7,6 +7,7 @@ export type AiAction =
   | { type: "SetIncomeGrowthRate"; who: Who; value: number }
   | { type: "SetLifestyleMonthly"; value: number }
   | { type: "SetHousingMonthlyRent"; value: number }
+  | { type: "SetHousingMonthlyRentFromYearIndex"; yearIndex: number; value: number }
   | { type: "SetStateTaxRate"; value: number }
   | { type: "SetRetirementSplitPct"; who: Who; preTaxPct: number; rothPct: number }
   | {

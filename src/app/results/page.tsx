@@ -17,6 +17,7 @@ import {
 import type { AiResponse } from "@/ai/types";
 import { applyAiActions } from "@/ai/applyActions";
 import { buildAiPromptPayload } from "@/ai/promptPayload";
+import { explainAiProposal } from "@/ai/describeProposal";
 
 function formatCurrency(n: number): string {
   return new Intl.NumberFormat("en-US", {
@@ -84,6 +85,21 @@ export default function ResultsPage() {
       return { error: e?.message ?? String(e) } as const;
     }
   }, [baselinePlan, aiResponse]);
+
+  const aiExplanation = useMemo(() => {
+    if (!baselinePlan || !aiResponse || aiResponse.actions.length === 0) return null;
+    if (!aiPreview || !("rows" in aiPreview) || !aiPreview.rows) return null;
+    try {
+      return explainAiProposal({
+        baselinePlan,
+        baselineRows,
+        scenarioRows: aiPreview.rows,
+        actions: aiResponse.actions,
+      });
+    } catch {
+      return null;
+    }
+  }, [aiPreview, aiResponse, baselinePlan, baselineRows]);
 
   const aiAppliedRows = useMemo(() => {
     if (!baselinePlan || !aiApplied || aiApplied.actions.length === 0) return null;
@@ -305,12 +321,41 @@ export default function ResultsPage() {
                   </div>
                 ) : null}
 
-                <div className="rounded-md border border-border bg-muted/10 p-3">
-                  <p className="mb-2 text-sm font-medium">Proposed actions (JSON)</p>
-                  <pre className="max-h-64 overflow-auto text-xs">
-                    {JSON.stringify(aiResponse.actions, null, 2)}
-                  </pre>
-                </div>
+                {aiExplanation ? (
+                  <div className="rounded-md border border-border bg-muted/10 p-3 text-sm">
+                    <p className="mb-2 font-medium">What this would change</p>
+                    <ul className="list-disc space-y-1 pl-5">
+                      {aiExplanation.changes.map((t, idx) => (
+                        <li key={idx}>{t}</li>
+                      ))}
+                    </ul>
+                    {aiExplanation.implications.length ? (
+                      <>
+                        <p className="mb-2 mt-4 font-medium">Implications (estimated from the simulation)</p>
+                        <ul className="list-disc space-y-1 pl-5">
+                          {aiExplanation.implications.map((t, idx) => (
+                            <li key={idx}>{t}</li>
+                          ))}
+                        </ul>
+                      </>
+                    ) : null}
+                    <details className="mt-4">
+                      <summary className="cursor-pointer text-xs text-muted-foreground">
+                        View proposed actions (JSON)
+                      </summary>
+                      <pre className="mt-2 max-h-64 overflow-auto rounded-md bg-muted/20 p-2 text-xs">
+                        {JSON.stringify(aiResponse.actions, null, 2)}
+                      </pre>
+                    </details>
+                  </div>
+                ) : (
+                  <div className="rounded-md border border-border bg-muted/10 p-3">
+                    <p className="mb-2 text-sm font-medium">Proposed actions (JSON)</p>
+                    <pre className="max-h-64 overflow-auto text-xs">
+                      {JSON.stringify(aiResponse.actions, null, 2)}
+                    </pre>
+                  </div>
+                )}
 
                 {aiPreview && "rows" in aiPreview && aiPreview.rows ? (
                   <div className="grid gap-4 sm:grid-cols-2">

@@ -68,6 +68,10 @@ export type AiPromptPayload = {
   allowedMutations: AiAllowedMutations;
   currentValues: AiCurrentValues;
   baselineSummary: AiBaselineSummary;
+  series: {
+    /** Baseline household gross income by yearIndex (zero-based). */
+    grossIncomeByYear: number[];
+  };
 };
 
 function getLifestyleMonthly(plan: PlanState): number {
@@ -143,12 +147,18 @@ export function buildAiPromptPayload(plan: PlanState, baselineRows: YearRow[]): 
       year0TaxesFica: y0?.payrollTax ?? 0,
     },
     whyNotes: [
+      "Year indices are zero-based: Year 0 is the first projection year (age = startAge + yearIndex). If the user says “in/after N years”, interpret that as yearIndex = N.",
       "Savings are allocated to cash until 6× total monthly outflow, then overflow goes to brokerage.",
       "Taxes include federal (2026 brackets + standard deduction), state flat %, and employee FICA (SS cap, Medicare, Additional Medicare).",
       "Employer match is based on employee total contribution % (pre-tax + Roth), capped by the match up-to percent of pay.",
     ],
   };
 
-  return { allowedMutations, currentValues, baselineSummary };
+  return {
+    allowedMutations,
+    currentValues,
+    baselineSummary,
+    series: { grossIncomeByYear: baselineRows.map((r) => r.grossIncome) },
+  };
 }
 

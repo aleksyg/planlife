@@ -356,6 +356,52 @@ function testNegativeSavingsDoesNotForceBrokerageSales() {
   assert(rows[0].endCashValue < 50_000, "cash absorbs drawdown first");
 }
 
+function testHousingOverrideFromYearIndex() {
+  const plan: PlanState = {
+    asOfYearMonth: "2026-02",
+    startAge: 30,
+    endAge: 32,
+    household: {
+      user: {
+        age: 30,
+        income: {
+          baseAnnual: 200_000,
+          hasBonus: false,
+          incomeGrowthRate: 0.0,
+          preTaxDeductionsMonthly: 0,
+          retirement: { hasPlan: false },
+        },
+      },
+      hasPartner: false,
+      tax: { filingStatus: "single" },
+      hasChildren: false,
+      housing: { status: "rent", monthlyRent: 2_000 },
+    },
+    expenses: { mode: "total", lifestyleMonthly: 3_000 },
+    debt: [],
+    balanceSheet: { assets: [], home: { owner: "joint", currentValue: 0 } },
+    assumptions: {
+      inflationRate: 0.0,
+      returnRate: 0.0,
+      cashRate: 0.0,
+      flatTaxRate: 0.3,
+      stateTaxRate: 0.0,
+    },
+  };
+
+  const base = simulatePlan(plan);
+  const scen = simulatePlan(plan, {
+    housingMonthlyRentFromYearIndex: 1,
+    housingMonthlyRentOverride: 10_000,
+  });
+
+  assert(base[0].housingMonthly === 2_000, "baseline year 0 housingMonthly");
+  assert(base[1].housingMonthly === 2_000, "baseline year 1 housingMonthly");
+  assert(scen[0].housingMonthly === 2_000, "scenario year 0 housingMonthly unchanged");
+  assert(scen[1].housingMonthly === 10_000, "scenario year 1 housingMonthly overridden");
+  assert(scen[2].housingMonthly === 10_000, "scenario year 2 housingMonthly overridden");
+}
+
 function main() {
   testFederalBracketEdges();
   testPayrollEdges();
@@ -363,6 +409,7 @@ function main() {
   testCashBufferAllocation();
   testQuitPartnerScenarioIncomeDrop();
   testNegativeSavingsDoesNotForceBrokerageSales();
+  testHousingOverrideFromYearIndex();
   console.log("engine assertions: OK");
 }
 

@@ -52,6 +52,11 @@ export function applyAiActions(baseline: PlanState, actions: AiAction[]): ApplyR
         plan.household.housing = { status: "rent", monthlyRent: action.value };
         break;
       }
+      case "SetHousingMonthlyRentFromYearIndex": {
+        options.housingMonthlyRentFromYearIndex = action.yearIndex;
+        options.housingMonthlyRentOverride = action.value;
+        break;
+      }
       case "SetStateTaxRate": {
         plan.assumptions.stateTaxRate = action.value;
         break;
@@ -88,7 +93,9 @@ export function applyAiActions(baseline: PlanState, actions: AiAction[]): ApplyR
     }
   }
 
-  const hasAnyOption = options.partnerZeroIncomeFromYearIndex !== undefined;
+  const hasAnyOption =
+    options.partnerZeroIncomeFromYearIndex !== undefined ||
+    options.housingMonthlyRentFromYearIndex !== undefined;
   return { plan, options: hasAnyOption ? options : undefined };
 }
 
