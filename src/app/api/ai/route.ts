@@ -48,25 +48,39 @@ function parseDollarAmount(s: string): number | null {
 function inferRentAndIncomeThreshold(prompt: string): { rentMonthly: number; incomeThresholdAnnual: number } | null {
   const p = prompt.toLowerCase();
 
-  // Rent: "rent 15k", "spend $15000 a month in rent", etc.
-  const rentMatch =
-    p.match(/\brent\s+to\s+\$?([\d.,]+(?:\.\d+)?\s*[km]?)\b/) ??
-    p.match(/\bincrease\s+(our\s+)?rent\s+to\s+\$?([\d.,]+(?:\.\d+)?\s*[km]?)\b/) ??
-    p.match(/\bset\s+rent\s+to\s+\$?([\d.,]+(?:\.\d+)?\s*[km]?)\b/) ??
-    p.match(/\brent\s+\$?([\d.,]+(?:\.\d+)?\s*[km]?)\b/) ??
-    p.match(/\bspend\s+\$?([\d.,]+(?:\.\d+)?\s*[km]?)\s+(a\s+)?month\s+in\s+rent\b/) ??
-    p.match(/\bspend\s+\$?([\d.,]+(?:\.\d+)?\s*[km]?)\s*\/\s*mo\s+in\s+rent\b/);
-  if (!rentMatch) return null;
-  const rentMonthly = parseDollarAmount(rentMatch[2] ?? rentMatch[1]);
+  const firstGroup = (patterns: RegExp[]): string | null => {
+    for (const re of patterns) {
+      const m = p.match(re);
+      const g1 = m?.[1];
+      if (g1) return g1;
+    }
+    return null;
+  };
+
+  // Rent: "rent to 15k", "increase our rent to $15000", "spend $15000 a month in rent", etc.
+  const rentPatterns: RegExp[] = [
+    /\brent\s+to\s+\$?([\d.,]+(?:\.\d+)?\s*[km]?)\b/,
+    /\bincrease\s+(?:our\s+)?rent\s+to\s+\$?([\d.,]+(?:\.\d+)?\s*[km]?)\b/,
+    /\bset\s+rent\s+to\s+\$?([\d.,]+(?:\.\d+)?\s*[km]?)\b/,
+    /\brent\s+\$?([\d.,]+(?:\.\d+)?\s*[km]?)\b/,
+    /\bspend\s+\$?([\d.,]+(?:\.\d+)?\s*[km]?)\s+(?:a\s+)?month\s+in\s+rent\b/,
+    /\bspend\s+\$?([\d.,]+(?:\.\d+)?\s*[km]?)\s*\/\s*mo\s+in\s+rent\b/,
+  ];
+  const rentRaw = firstGroup(rentPatterns);
+  if (!rentRaw) return null;
+  const rentMonthly = parseDollarAmount(rentRaw);
   if (!rentMonthly || rentMonthly <= 0) return null;
 
-  // Threshold: "once income hits $1.5m", "when household income reaches 1500000"
-  const threshMatch =
-    p.match(/\b(once|when)\s+(our\s+)?(household\s+)?income\s+(hits|reaches)\s+\$?([\d.,]+(?:\.\d+)?\s*[km]?)\b/) ??
-    p.match(/\bonce\s+(our\s+)?(household\s+)?income\s+is\s+\$?([\d.,]+(?:\.\d+)?\s*[km]?)\b/);
-  const raw = threshMatch ? (threshMatch[5] ?? threshMatch[3]) : null;
-  if (!raw) return null;
-  const incomeThresholdAnnual = parseDollarAmount(raw);
+  // Threshold: "once income hits $1.5m", "when household income reaches 1500000",
+  // "once household income is greater than $1.5m", "income > $1.5m", etc.
+  const thresholdPatterns: RegExp[] = [
+    /\b(?:once|when)\s+(?:our\s+)?(?:household\s+)?income\s+(?:hits|reaches|exceeds)\s+\$?([\d.,]+(?:\.\d+)?\s*[km]?)\b/,
+    /\b(?:once|when)\s+(?:our\s+)?(?:household\s+)?income\s+is\s+(?:over|above|greater\s+than|>=)\s+\$?([\d.,]+(?:\.\d+)?\s*[km]?)\b/,
+    /\b(?:once|when)\s+(?:our\s+)?(?:household\s+)?income\s*(?:>|>=)\s*\$?([\d.,]+(?:\.\d+)?\s*[km]?)\b/,
+  ];
+  const thresholdRaw = firstGroup(thresholdPatterns);
+  if (!thresholdRaw) return null;
+  const incomeThresholdAnnual = parseDollarAmount(thresholdRaw);
   if (!incomeThresholdAnnual || incomeThresholdAnnual <= 0) return null;
 
   return { rentMonthly, incomeThresholdAnnual };
