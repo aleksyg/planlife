@@ -402,6 +402,55 @@ function testHousingOverrideFromYearIndex() {
   assert(scen[2].housingMonthly === 10_000, "scenario year 2 housingMonthly overridden");
 }
 
+function testIncomeOverrideSegmentsTimeOffThenReturn() {
+  const plan: PlanState = {
+    asOfYearMonth: "2026-02",
+    startAge: 30,
+    endAge: 35,
+    household: {
+      user: {
+        age: 30,
+        income: {
+          baseAnnual: 100_000,
+          hasBonus: false,
+          incomeGrowthRate: 0.0,
+          preTaxDeductionsMonthly: 0,
+          retirement: { hasPlan: false },
+        },
+      },
+      hasPartner: false,
+      tax: { filingStatus: "single" },
+      hasChildren: false,
+      housing: { status: "rent", monthlyRent: 0 },
+    },
+    expenses: { mode: "total", lifestyleMonthly: 0 },
+    debt: [],
+    balanceSheet: { assets: [], home: { owner: "joint", currentValue: 0 } },
+    assumptions: {
+      inflationRate: 0.0,
+      returnRate: 0.0,
+      cashRate: 0.0,
+      flatTaxRate: 0.3,
+      stateTaxRate: 0.0,
+    },
+  };
+
+  const base = simulatePlan(plan);
+  const scen = simulatePlan(plan, {
+    userBaseAnnualSegments: [
+      { startYearIndex: 1, endYearIndexInclusive: 3, baseAnnual: 0 },
+      { startYearIndex: 4, baseAnnual: 2_000_000 },
+    ],
+  });
+
+  assertApprox(base[0].grossIncome, 100_000, 0.01, "baseline year 0 income");
+  assertApprox(scen[0].grossIncome, 100_000, 0.01, "scenario year 0 unchanged");
+  assertApprox(scen[1].grossIncome, 0, 0.01, "scenario year 1 off");
+  assertApprox(scen[2].grossIncome, 0, 0.01, "scenario year 2 off");
+  assertApprox(scen[3].grossIncome, 0, 0.01, "scenario year 3 off");
+  assertApprox(scen[4].grossIncome, 2_000_000, 0.01, "scenario year 4 return");
+}
+
 function main() {
   testFederalBracketEdges();
   testPayrollEdges();
@@ -410,6 +459,7 @@ function main() {
   testQuitPartnerScenarioIncomeDrop();
   testNegativeSavingsDoesNotForceBrokerageSales();
   testHousingOverrideFromYearIndex();
+  testIncomeOverrideSegmentsTimeOffThenReturn();
   console.log("engine assertions: OK");
 }
 

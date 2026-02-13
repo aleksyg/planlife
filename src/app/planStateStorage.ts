@@ -23,10 +23,14 @@ export function buildPlanStateFromForm(form: BaselineFormState): PlanState {
   const startAge = form.startAge ?? 30;
   const endAge = form.endAge ?? 65;
 
+  // In the baseline form, these are entered as percentages (e.g. 9 => 0.09).
+  const pctToRate = (pct: number | undefined, fallbackRate: number) =>
+    typeof pct === "number" && Number.isFinite(pct) ? pct / 100 : fallbackRate;
+
   const userIncome = {
     baseAnnual: form.userBaseAnnual ?? 0,
     hasBonus: false,
-    incomeGrowthRate: form.incomeGrowthRate ?? 0.03,
+    incomeGrowthRate: pctToRate(form.incomeGrowthRate, 0.03),
     preTaxDeductionsMonthly: form.userPreTaxDeductionsMonthly ?? 0,
     retirement: {
       hasPlan: form.userHasRetirement ?? false,
@@ -41,7 +45,7 @@ export function buildPlanStateFromForm(form: BaselineFormState): PlanState {
   const partnerIncome = {
     baseAnnual: form.partnerBaseAnnual ?? 0,
     hasBonus: false,
-    incomeGrowthRate: form.incomeGrowthRate ?? 0.03,
+    incomeGrowthRate: pctToRate(form.incomeGrowthRate, 0.03),
     preTaxDeductionsMonthly: form.partnerPreTaxDeductionsMonthly ?? 0,
     retirement: {
       hasPlan: form.partnerHasRetirement ?? false,
@@ -108,11 +112,11 @@ export function buildPlanStateFromForm(form: BaselineFormState): PlanState {
       home: { owner: "joint", currentValue: form.homeValue ?? 0 },
     },
     assumptions: {
-      inflationRate: form.inflationRate ?? 0.025,
-      returnRate: form.returnRate ?? 0.07,
-      cashRate: form.cashRate ?? 0.04,
-      flatTaxRate: form.flatTaxRate ?? 0.3,
-      stateTaxRate: form.stateTaxRate ?? 0,
+      inflationRate: pctToRate(form.inflationRate, 0.025),
+      returnRate: pctToRate(form.returnRate, 0.07),
+      cashRate: pctToRate(form.cashRate, 0.04),
+      flatTaxRate: pctToRate(form.flatTaxRate, 0.3),
+      stateTaxRate: pctToRate(form.stateTaxRate, 0),
     },
   };
 }
@@ -183,6 +187,22 @@ export function validateBaselineForm(form: BaselineFormState): string | null {
     return "Debt APR must be >= 0.";
   if (form.debtMonthlyPayment == null || form.debtMonthlyPayment < 0)
     return "Debt monthly payment must be >= 0.";
+  // Rates in the form are entered as percentages (e.g. 9 = 9%).
+  const assertPct = (v: number | undefined, label: string, max: number) => {
+    if (v == null) return null;
+    if (!Number.isFinite(v)) return `${label} must be a valid number.`;
+    if (v < 0) return `${label} must be >= 0%.`;
+    if (v > max) return `${label} must be <= ${max}%.`;
+    return null;
+  };
+  const pctErr =
+    assertPct(form.stateTaxRate, "State tax rate", 30) ??
+    assertPct(form.incomeGrowthRate, "Income growth rate", 50) ??
+    assertPct(form.inflationRate, "Inflation", 30) ??
+    assertPct(form.returnRate, "Investment return", 50) ??
+    assertPct(form.cashRate, "Cash return", 30) ??
+    assertPct(form.flatTaxRate, "Flat tax rate", 80);
+  if (pctErr) return pctErr;
   if (form.hasPartner && (form.partnerBaseAnnual == null || form.partnerBaseAnnual < 0))
     return "Partner income must be >= 0 when partner is enabled.";
   if (form.hasPartner && form.filingStatus === "single")
@@ -328,7 +348,8 @@ export function getDefaultFormState(): BaselineFormState {
     startAge: 30,
     endAge: 65,
     userBaseAnnual: 100_000,
-    incomeGrowthRate: 0.03,
+    // Rates in the form are entered as percentages (e.g. 3 = 3%).
+    incomeGrowthRate: 3,
     userHasRetirement: true,
     userRetirementPreTaxPct: 10,
     userRetirementRothPct: 0,
@@ -354,10 +375,10 @@ export function getDefaultFormState(): BaselineFormState {
     assetsCash: 20_000,
     assetsInvestments: 50_000,
     homeValue: 0,
-    inflationRate: 0.025,
-    returnRate: 0.07,
-    cashRate: 0.04,
-    flatTaxRate: 0.3,
+    inflationRate: 2.5,
+    returnRate: 7,
+    cashRate: 4,
+    flatTaxRate: 30,
     stateTaxRate: 0,
   };
 }

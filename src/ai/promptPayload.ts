@@ -71,6 +71,10 @@ export type AiPromptPayload = {
   series: {
     /** Baseline household gross income by yearIndex (zero-based). */
     grossIncomeByYear: number[];
+    /** Baseline brokerage value (taxable investments) by yearIndex. */
+    brokerageByYear: number[];
+    /** Baseline net worth by yearIndex. */
+    netWorthByYear: number[];
   };
 };
 
@@ -158,7 +162,11 @@ export function buildAiPromptPayload(plan: PlanState, baselineRows: YearRow[]): 
     allowedMutations,
     currentValues,
     baselineSummary,
-    series: { grossIncomeByYear: baselineRows.map((r) => r.grossIncome) },
+    series: {
+      grossIncomeByYear: baselineRows.map((r) => r.grossIncome),
+      brokerageByYear: baselineRows.map((r) => r.endBrokerageValue),
+      netWorthByYear: baselineRows.map((r) => r.endNetWorth),
+    },
   };
 }
 

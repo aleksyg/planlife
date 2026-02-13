@@ -39,6 +39,42 @@ export function applyAiActions(baseline: PlanState, actions: AiAction[]): ApplyR
         }
         break;
       }
+      case "SetUserBaseAnnualFromYearIndex": {
+        options.userBaseAnnualSegments = [
+          ...(options.userBaseAnnualSegments ?? []),
+          { startYearIndex: action.yearIndex, baseAnnual: action.value },
+        ];
+        break;
+      }
+      case "SetPartnerBaseAnnualFromYearIndex": {
+        options.partnerBaseAnnualSegments = [
+          ...(options.partnerBaseAnnualSegments ?? []),
+          { startYearIndex: action.yearIndex, baseAnnual: action.value },
+        ];
+        break;
+      }
+      case "SetUserBaseAnnualForYearRange": {
+        options.userBaseAnnualSegments = [
+          ...(options.userBaseAnnualSegments ?? []),
+          {
+            startYearIndex: action.startYearIndex,
+            endYearIndexInclusive: action.endYearIndexInclusive,
+            baseAnnual: action.value,
+          },
+        ];
+        break;
+      }
+      case "SetPartnerBaseAnnualForYearRange": {
+        options.partnerBaseAnnualSegments = [
+          ...(options.partnerBaseAnnualSegments ?? []),
+          {
+            startYearIndex: action.startYearIndex,
+            endYearIndexInclusive: action.endYearIndexInclusive,
+            baseAnnual: action.value,
+          },
+        ];
+        break;
+      }
       case "SetIncomeGrowthRate": {
         getPerson(plan, action.who).income.incomeGrowthRate = action.value;
         break;
@@ -95,7 +131,9 @@ export function applyAiActions(baseline: PlanState, actions: AiAction[]): ApplyR
 
   const hasAnyOption =
     options.partnerZeroIncomeFromYearIndex !== undefined ||
-    options.housingMonthlyRentFromYearIndex !== undefined;
+    options.housingMonthlyRentFromYearIndex !== undefined ||
+    (options.userBaseAnnualSegments?.length ?? 0) > 0 ||
+    (options.partnerBaseAnnualSegments?.length ?? 0) > 0;
   return { plan, options: hasAnyOption ? options : undefined };
 }
 

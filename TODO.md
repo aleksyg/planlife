@@ -78,3 +78,41 @@ Cash handling and goal logic should be designed so that:
 ## Backlog / ideas (no order)
 
 - [ ] Anything else you want to track here.
+
+---
+
+## 4. Mortgage handling (buy vs rent, amortization, extra payments)
+
+**Goal:** Support modeling “buy now vs rent longer” and “pay down mortgage vs invest” with realistic mortgage cashflows.
+
+**Core pieces (engine-level):**
+
+- [ ] Add a first-class “home purchase” path (timed event) with:
+  - Purchase price, down payment, closing costs
+  - Mortgage principal, rate, term, start year
+  - Ongoing housing costs: property tax, insurance, maintenance (rules/inputs TBD)
+- [ ] Mortgage amortization schedule (monthly accrual + payments; principal/interest split; payoff).
+- [ ] Optional extra principal payments (fixed monthly or percent of surplus) to enable “pay down vs invest” comparisons.
+- [ ] Home value appreciation assumptions (separate from investment returns; deterministic).
+
+**Tax note (later):**
+
+- [ ] Consider **mortgage interest deductibility**:
+  - Only applies if **itemizing** beats standard deduction (MFJ/single).
+  - Deduction caps/limits depend on policy year; treat as a versioned tax policy constant (like 2026 brackets).
+  - Start with a simple deterministic implementation (federal only), then refine.
+
+---
+
+## 5. AI upgrades (beyond single-mutation proposals)
+
+**Goal:** Move from “single proposed mutation” to “AI proposes + runs a small set of reasonable scenarios and explains tradeoffs” while keeping the engine pure/deterministic.
+
+- [ ] Add “planner mode” that can generate **3–5 candidate scenarios**, run them, and present a short **tradeoff summary** (net worth, liquidity/cash-buffer breaches, time-to-goal).
+- [ ] Expand action vocabulary toward **time-based policies**, not only single scalar edits (e.g., “from yearIndex onward”, “until goal funded”).
+- [ ] Add deterministic **scenario selection** rules (e.g., show Pareto-efficient set + anchors: maximize net worth / maximize liquidity / balanced).
+- [ ] Improve conditional language handling:
+  - “once income hits $X” (done for rent)
+  - “once cash reaches $X”
+  - “until age X / yearIndex X”
+- [ ] Add stress-test scenarios (deterministic bear/base/bull) as a bridge before Monte Carlo.

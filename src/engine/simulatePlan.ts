@@ -1,4 +1,4 @@
-import type { Debt, Expenses, Housing, Person, PlanState } from './types/planState';
+import type { Debt, Expenses, Housing, PlanState, YearInputs } from './types/planState';
 import {
   computeEmployeePayrollTaxes,
   computeFederalIncomeTax,
@@ -124,135 +124,79 @@ type CompAtAge = {
   grossAnnual: number;
 };
 
-function getPersonCompAtAge(
-  personAgeNow: number,
-  targetAge: number,
+function mergePersonCompAtYearIndex(args: {
+  yearIndex: number;
+  income: {
+    baseAnnual: number;
+    hasBonus: boolean;
+    bonusAnnual?: number;
+    incomeGrowthRate: number;
+  };
+  segments?: IncomeBaseAnnualSegment[];
+  /** When true, allow IncomeBaseAnnualSegments to override base and zero bonus (legacy behavior). */
+  allowSegments: boolean;
+  /** Explicit per-year overrides; either field may be omitted to preserve baseline behavior. */
+  yearInputs?: { baseAnnual?: number; bonusAnnual?: number };
+}): CompAtAge {
+  const baseline = getPersonCompAtYearIndex(
+    args.yearIndex,
+    args.income,
+    args.allowSegments ? args.segments : undefined,
+  );
+  const baseAnnual = args.yearInputs?.baseAnnual ?? baseline.baseAnnual;
+  const bonusAnnual = args.yearInputs?.bonusAnnual ?? baseline.bonusAnnual;
+  return { baseAnnual, bonusAnnual, grossAnnual: baseAnnual + bonusAnnual };
+}
+
+function getActiveBaseAnnualSegment(
+  segments: IncomeBaseAnnualSegment[] | undefined,
+  yearIndex: number,
+): IncomeBaseAnnualSegment | null {
+  if (!segments || segments.length === 0) return null;
+  // Last segment that matches wins (allows overrides to be appended).
+  let best: IncomeBaseAnnualSegment | null = null;
+  for (const s of segments) {
+    const startOk = yearIndex >= s.startYearIndex;
+    const endOk = s.endYearIndexInclusive == null || yearIndex <= s.endYearIndexInclusive;
+    if (startOk && endOk) best = s;
+  }
+  return best;
+}
+
+function getPersonCompAtYearIndex(
+  yearIndex: number,
   income: {
     baseAnnual: number;
     hasBonus: boolean;
     bonusAnnual?: number;
     incomeGrowthRate: number;
   },
+  segments?: IncomeBaseAnnualSegment[],
 ): CompAtAge {
-  const yearsForward = targetAge - personAgeNow;
-  const growth = Math.pow(1 + income.incomeGrowthRate, Math.max(0, yearsForward));
+  const seg = getActiveBaseAnnualSegment(segments, yearIndex);
+  if (seg) {
+    const yearsSinceStart = Math.max(0, yearIndex - seg.startYearIndex);
+    const growth = Math.pow(1 + income.incomeGrowthRate, yearsSinceStart);
+    const baseAnnual = seg.baseAnnual * growth;
+    // v1: when income is overridden by a segment (e.g. time off), assume bonus is 0.
+    return { baseAnnual, bonusAnnual: 0, grossAnnual: baseAnnual };
+  }
 
+  const growth = Math.pow(1 + income.incomeGrowthRate, Math.max(0, yearIndex));
   const baseAnnual = income.baseAnnual * growth;
   const bonusAnnual = income.hasBonus ? (income.bonusAnnual ?? 0) * growth : 0;
-
-  return {
-    baseAnnual,
-    bonusAnnual,
-    grossAnnual: baseAnnual + bonusAnnual,
-  };
-}
-
-function getPersonGrossIncomeAtAge(
-  personAgeNow: number,
-  targetAge: number,
-  income: { baseAnnual: number; hasBonus: boolean; bonusAnnual?: number; incomeGrowthRate: number },
-): number {
-  return getPersonCompAtAge(personAgeNow, targetAge, income).grossAnnual;
-}
-
-function getHouseholdGrossIncomeAtAge(
-  plan: PlanState,
-  targetAge: number,
-  opts?: { partnerZeroFromYearIndex?: number; yearIndex?: number },
-): number {
-  const user = plan.household.user;
-  let total = getPersonGrossIncomeAtAge(user.age, targetAge, user.income);
-
-  const zeroPartner =
-    opts?.partnerZeroFromYearIndex !== undefined &&
-    opts?.yearIndex !== undefined &&
-    opts.yearIndex >= opts.partnerZeroFromYearIndex;
-
-  if (plan.household.hasPartner && plan.household.partner && !zeroPartner) {
-    const yearsForward = targetAge - user.age;
-    const partnerAgeAtTarget = plan.household.partner.age + yearsForward;
-    total += getPersonGrossIncomeAtAge(
-      plan.household.partner.age,
-      partnerAgeAtTarget,
-      plan.household.partner.income,
-    );
-  }
-
-  return total;
-}
-
-function getPersonRetirementContribAtAge(person: Person, targetAge: number) {
-  const comp = getPersonCompAtAge(person.age, targetAge, person.income);
-
-  // v1: retirement contributions computed on BASE only
-  const retirement = person.income.retirement;
-  if (!retirement?.hasPlan) {
-    return {
-      employeePreTax: 0,
-      employeeRoth: 0,
-      employeeTotal: 0,
-      employer: 0,
-      total: 0,
-    };
-  }
-
-  const employeePreTaxPct = (retirement.employeePreTaxContributionPct ?? 0) / 100;
-  const employeeRothPct = (retirement.employeeRothContributionPct ?? 0) / 100;
-  const employeeTotalPct = employeePreTaxPct + employeeRothPct;
-
-  const employeePreTax = comp.baseAnnual * employeePreTaxPct;
-  const employeeRoth = comp.baseAnnual * employeeRothPct;
-  const employeeTotal = employeePreTax + employeeRoth;
-
-  let employer = 0;
-  if (retirement.hasEmployerMatch) {
-    const matchRate = (retirement.employerMatchPct ?? 0) / 100;
-    const upTo = (retirement.employerMatchUpToPct ?? 0) / 100;
-    const matchedPct = Math.min(employeeTotalPct, upTo);
-    employer = comp.baseAnnual * matchedPct * matchRate;
-  }
-
-  return { employeePreTax, employeeRoth, employeeTotal, employer, total: employeeTotal + employer };
-}
-
-function getHouseholdRetirementContribAtAge(
-  plan: PlanState,
-  targetAge: number,
-  opts?: { partnerZeroFromYearIndex?: number; yearIndex?: number },
-) {
-  const userContrib = getPersonRetirementContribAtAge(plan.household.user, targetAge);
-
-  const zeroPartner =
-    opts?.partnerZeroFromYearIndex !== undefined &&
-    opts?.yearIndex !== undefined &&
-    opts.yearIndex >= opts.partnerZeroFromYearIndex;
-
-  let partnerContrib = {
-    employeePreTax: 0,
-    employeeRoth: 0,
-    employeeTotal: 0,
-    employer: 0,
-    total: 0,
-  };
-  if (plan.household.hasPartner && plan.household.partner && !zeroPartner) {
-    const yearsForward = targetAge - plan.household.user.age;
-    const partnerAgeAtTarget = plan.household.partner.age + yearsForward;
-
-    // Compute partner contributions at their age in that same year
-    const partnerAtAge: Person = { ...plan.household.partner, age: partnerAgeAtTarget };
-    partnerContrib = getPersonRetirementContribAtAge(partnerAtAge, partnerAgeAtTarget);
-  }
-
-  return {
-    employeePreTax: userContrib.employeePreTax + partnerContrib.employeePreTax,
-    employeeRoth: userContrib.employeeRoth + partnerContrib.employeeRoth,
-    employeeTotal: userContrib.employeeTotal + partnerContrib.employeeTotal,
-    employer: userContrib.employer + partnerContrib.employer,
-    total: userContrib.total + partnerContrib.total,
-  };
+  return { baseAnnual, bonusAnnual, grossAnnual: baseAnnual + bonusAnnual };
 }
 
 /** Options for scenario runs (e.g. partner quits from a given year index). */
+export type IncomeBaseAnnualSegment = {
+  startYearIndex: number;
+  /** Inclusive. If omitted, applies through end of projection. */
+  endYearIndexInclusive?: number;
+  /** Base annual income at the segment start (before growth within the segment). */
+  baseAnnual: number;
+};
+
 export type SimulatePlanOptions = {
   /** From this year index onward, partner income and retirement contrib are treated as 0. */
   partnerZeroIncomeFromYearIndex?: number;
@@ -263,11 +207,23 @@ export type SimulatePlanOptions = {
    */
   housingMonthlyRentFromYearIndex?: number;
   housingMonthlyRentOverride?: number;
+
+  /** Piecewise base-annual overrides for user income (supports time off + return). */
+  userBaseAnnualSegments?: IncomeBaseAnnualSegment[];
+  /** Piecewise base-annual overrides for partner income (supports time off + return). */
+  partnerBaseAnnualSegments?: IncomeBaseAnnualSegment[];
+
+  /**
+   * Explicit per-year inputs (materialized outside the engine).
+   * If provided, these take precedence over other scenario options.
+   */
+  yearInputs?: YearInputs[];
 };
 
 export function simulatePlan(plan: PlanState, options?: SimulatePlanOptions): YearRow[] {
   const rows: YearRow[] = [];
   const partnerZeroFromYearIndex = options?.partnerZeroIncomeFromYearIndex;
+  const hasYearInputs = Boolean(options?.yearInputs && options.yearInputs.length > 0);
 
   const lifestyleMonthly = getLifestyleMonthly(plan.expenses);
   const baselineHousingMonthly = getHousingMonthly(plan.household.housing);
@@ -306,13 +262,19 @@ export function simulatePlan(plan: PlanState, options?: SimulatePlanOptions): Ye
     const age = plan.startAge + i;
     if (incomeOpts) incomeOpts.yearIndex = i;
 
-    const housingMonthly =
+    const yi = hasYearInputs ? options!.yearInputs![i] : undefined;
+    const yiSafe = yi && yi.yearIndex === i ? yi : undefined;
+
+    const housingMonthly = yiSafe?.housingMonthly ?? (
+      !hasYearInputs &&
       housingOverrideFromYearIndex !== undefined &&
       housingOverrideMonthly !== undefined &&
       i >= housingOverrideFromYearIndex
         ? housingOverrideMonthly
-        : baselineHousingMonthly;
-    const totalMonthlyOutflow = lifestyleMonthly + housingMonthly + debtMonthly;
+        : baselineHousingMonthly
+    );
+    const lifestyleMonthlyThis = yiSafe?.lifestyleMonthly ?? lifestyleMonthly;
+    const totalMonthlyOutflow = lifestyleMonthlyThis + housingMonthly + debtMonthly;
     const annualOutflow = totalMonthlyOutflow * 12;
 
     // Amortize debts for 12 months (monthly inner loop).
@@ -326,35 +288,101 @@ export function simulatePlan(plan: PlanState, options?: SimulatePlanOptions): Ye
       plan.debt.reduce((sum, d) => sum + (debtBalances[d.id] ?? 0), 0),
     );
 
-    const grossIncome = getHouseholdGrossIncomeAtAge(plan, age, incomeOpts);
-    const retirement = getHouseholdRetirementContribAtAge(plan, age, incomeOpts);
-
-    // Taxes (v1): federal income tax (brackets + standard deduction) + employee-side payroll taxes.
-    const filingStatus = plan.household.tax.filingStatus;
-
-    const userComp = getPersonCompAtAge(plan.household.user.age, age, plan.household.user.income);
-
     const zeroPartner =
+      !hasYearInputs &&
       incomeOpts?.partnerZeroFromYearIndex !== undefined &&
       incomeOpts?.yearIndex !== undefined &&
       incomeOpts.yearIndex >= incomeOpts.partnerZeroFromYearIndex;
 
-    let partnerComp: CompAtAge | null = null;
-    if (plan.household.hasPartner && plan.household.partner && !zeroPartner) {
-      const yearsForward = age - plan.household.user.age;
-      const partnerAgeAtTarget = plan.household.partner.age + yearsForward;
-      partnerComp = getPersonCompAtAge(
-        plan.household.partner.age,
-        partnerAgeAtTarget,
-        plan.household.partner.income,
-      );
-    }
+    const userComp = mergePersonCompAtYearIndex({
+      yearIndex: i,
+      income: plan.household.user.income,
+      segments: options?.userBaseAnnualSegments,
+      allowSegments: !hasYearInputs,
+      yearInputs: yiSafe?.user,
+    });
 
-    const userPreTaxDeductionsAnnual = round2(
-      (plan.household.user.income.preTaxDeductionsMonthly ?? 0) * 12,
-    );
+    const partnerComp =
+      plan.household.hasPartner && plan.household.partner && !zeroPartner
+        ? (() => {
+            return mergePersonCompAtYearIndex({
+              yearIndex: i,
+              income: plan.household.partner!.income,
+              segments: options?.partnerBaseAnnualSegments,
+              allowSegments: !hasYearInputs,
+              yearInputs: yiSafe?.partner,
+            });
+          })()
+        : null;
+
+    const grossIncome = userComp.grossAnnual + (partnerComp?.grossAnnual ?? 0);
+
+    const userIncomeRetirement = {
+      ...plan.household.user.income.retirement,
+      ...(yiSafe?.user?.retirement ?? {}),
+    };
+    const userRet = (() => {
+      if (!userIncomeRetirement?.hasPlan) {
+        return { employeePreTax: 0, employeeRoth: 0, employeeTotal: 0, employer: 0, total: 0 };
+      }
+      const employeePreTaxPct = (userIncomeRetirement.employeePreTaxContributionPct ?? 0) / 100;
+      const employeeRothPct = (userIncomeRetirement.employeeRothContributionPct ?? 0) / 100;
+      const employeeTotalPct = employeePreTaxPct + employeeRothPct;
+      const employeePreTax = userComp.baseAnnual * employeePreTaxPct;
+      const employeeRoth = userComp.baseAnnual * employeeRothPct;
+      const employeeTotal = employeePreTax + employeeRoth;
+      let employer = 0;
+      if (userIncomeRetirement.hasEmployerMatch) {
+        const matchRate = (userIncomeRetirement.employerMatchPct ?? 0) / 100;
+        const upTo = (userIncomeRetirement.employerMatchUpToPct ?? 0) / 100;
+        const matchedPct = Math.min(employeeTotalPct, upTo);
+        employer = userComp.baseAnnual * matchedPct * matchRate;
+      }
+      return { employeePreTax, employeeRoth, employeeTotal, employer, total: employeeTotal + employer };
+    })();
+    const partnerRet =
+      plan.household.hasPartner && plan.household.partner && !zeroPartner
+        ? (() => {
+            const partnerIncomeRetirement = {
+              ...plan.household.partner!.income.retirement,
+              ...(yiSafe?.partner?.retirement ?? {}),
+            };
+            if (!partnerIncomeRetirement?.hasPlan) {
+              return { employeePreTax: 0, employeeRoth: 0, employeeTotal: 0, employer: 0, total: 0 };
+            }
+            const employeePreTaxPct = (partnerIncomeRetirement.employeePreTaxContributionPct ?? 0) / 100;
+            const employeeRothPct = (partnerIncomeRetirement.employeeRothContributionPct ?? 0) / 100;
+            const employeeTotalPct = employeePreTaxPct + employeeRothPct;
+            const employeePreTax = (partnerComp?.baseAnnual ?? 0) * employeePreTaxPct;
+            const employeeRoth = (partnerComp?.baseAnnual ?? 0) * employeeRothPct;
+            const employeeTotal = employeePreTax + employeeRoth;
+            let employer = 0;
+            if (partnerIncomeRetirement.hasEmployerMatch) {
+              const matchRate = (partnerIncomeRetirement.employerMatchPct ?? 0) / 100;
+              const upTo = (partnerIncomeRetirement.employerMatchUpToPct ?? 0) / 100;
+              const matchedPct = Math.min(employeeTotalPct, upTo);
+              employer = (partnerComp?.baseAnnual ?? 0) * matchedPct * matchRate;
+            }
+            return { employeePreTax, employeeRoth, employeeTotal, employer, total: employeeTotal + employer };
+          })()
+        : { employeePreTax: 0, employeeRoth: 0, employeeTotal: 0, employer: 0, total: 0 };
+
+    const retirement = {
+      employeePreTax: userRet.employeePreTax + partnerRet.employeePreTax,
+      employeeRoth: userRet.employeeRoth + partnerRet.employeeRoth,
+      employeeTotal: userRet.employeeTotal + partnerRet.employeeTotal,
+      employer: userRet.employer + partnerRet.employer,
+      total: userRet.total + partnerRet.total,
+    };
+
+    // Taxes (v1): federal income tax (brackets + standard deduction) + employee-side payroll taxes.
+    const filingStatus = plan.household.tax.filingStatus;
+
+    const userPreTaxDeductionsAnnual = round2(((yiSafe?.user?.preTaxDeductionsMonthly ?? plan.household.user.income.preTaxDeductionsMonthly ?? 0) * 12));
     const partnerPreTaxDeductionsAnnual = round2(
-      partnerComp ? (plan.household.partner!.income.preTaxDeductionsMonthly ?? 0) * 12 : 0,
+      partnerComp
+        ? ((yiSafe?.partner?.preTaxDeductionsMonthly ?? plan.household.partner!.income.preTaxDeductionsMonthly ?? 0) * 12)
+        : 0,
     );
     const householdPreTaxDeductionsAnnual = round2(
       userPreTaxDeductionsAnnual + partnerPreTaxDeductionsAnnual,
@@ -376,7 +404,7 @@ export function simulatePlan(plan: PlanState, options?: SimulatePlanOptions): Ye
     );
 
     // Placeholder state tax (v1): apply a flat rate to taxable income after standard deduction.
-    const stateTaxRate = plan.assumptions.stateTaxRate ?? 0;
+    const stateTaxRate = yiSafe?.rates?.stateTaxRate ?? (plan.assumptions.stateTaxRate ?? 0);
     const stateIncomeTax = round2(taxableIncomeAfterDeduction * stateTaxRate);
 
     // FICA wages are reduced by pre-tax payroll deductions (but NOT by 401k pre-tax contributions).
@@ -401,12 +429,16 @@ export function simulatePlan(plan: PlanState, options?: SimulatePlanOptions): Ye
     // Payroll-correct cashflow: Roth is deducted after tax; outflows come from take-home.
     const takeHomeAfterRoth = afterTaxIncome - retirement.employeeRoth;
     const annualSavings = takeHomeAfterRoth - annualOutflow;
+    const oneTimeNet = round2((yiSafe?.oneTimeEvents ?? []).reduce((s, e) => s + (e.amount ?? 0), 0));
+    const annualSavingsIncludingEvents = round2(annualSavings + oneTimeNet);
 
     // Apply returns
-    cashValue *= 1 + plan.assumptions.cashRate;
-    brokerageValue *= 1 + plan.assumptions.returnRate;
-    retirementTaxDeferredValue *= 1 + plan.assumptions.returnRate;
-    retirementRothValue *= 1 + plan.assumptions.returnRate;
+    const cashRate = yiSafe?.rates?.cashRate ?? plan.assumptions.cashRate;
+    const returnRate = yiSafe?.rates?.returnRate ?? plan.assumptions.returnRate;
+    cashValue *= 1 + cashRate;
+    brokerageValue *= 1 + returnRate;
+    retirementTaxDeferredValue *= 1 + returnRate;
+    retirementRothValue *= 1 + returnRate;
 
     // Route contributions to buckets.
     retirementTaxDeferredValue += retirement.employeePreTax + retirement.employer;
@@ -426,6 +458,15 @@ export function simulatePlan(plan: PlanState, options?: SimulatePlanOptions): Ye
       brokerageValue = round2(brokerageValue + toBrokerage);
     } else {
       cashValue = round2(cashValue + annualSavings);
+    }
+
+    // Apply explicit one-time events directly to requested buckets (default cash).
+    if (yiSafe?.oneTimeEvents && yiSafe.oneTimeEvents.length) {
+      for (const e of yiSafe.oneTimeEvents) {
+        const bucket = e.fromBucket ?? 'cash';
+        if (bucket === 'brokerage') brokerageValue = round2(brokerageValue + e.amount);
+        else cashValue = round2(cashValue + e.amount);
+      }
     }
 
     // Clamp tiny negative noise to 0 for stability.
@@ -457,10 +498,10 @@ export function simulatePlan(plan: PlanState, options?: SimulatePlanOptions): Ye
 
       housingMonthly,
       debtMonthly,
-      lifestyleMonthly,
+      lifestyleMonthly: lifestyleMonthlyThis,
 
       totalMonthlyOutflow,
-      annualSavings,
+      annualSavings: annualSavingsIncludingEvents,
 
       employeeRetirementAnnual: retirement.employeeTotal,
       employeeRetirementPreTaxAnnual: retirement.employeePreTax,

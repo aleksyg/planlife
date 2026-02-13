@@ -174,3 +174,5 @@ export type PlanState = {
     stateTaxRate: number; // placeholder (e.g. 0.05)
   };
 };
+
+export type { YearInputs, PersonYearInputs, OneTimeEventInput } from './yearInputs';

@@ -1,6 +1,6 @@
 import type { PlanState } from "@/engine";
 import type { YearRow } from "@/engine";
-import type { AiAction } from "./types";
+import type { AiScenarioPatch } from "./types";
 
 function formatCurrency(n: number): string {
   return new Intl.NumberFormat("en-US", {
@@ -19,95 +19,61 @@ function formatRate(r: number): string {
   return `${(r * 100).toFixed(1)}%`;
 }
 
-function describeAction(action: AiAction, baseline: PlanState): string {
-  switch (action.type) {
-    case "QuitPartnerJobFromYearIndex": {
-      const base = baseline.household.partner?.income.baseAnnual ?? 0;
-      const age = baseline.startAge + action.yearIndex;
-      return `Partner stops working starting Year ${action.yearIndex} (age ${age}); partner income is treated as $0 from then onward. Current partner base salary is ${formatCurrency(base)}/yr.`;
-    }
-    case "SetUserBaseAnnual": {
-      const from = baseline.household.user.income.baseAnnual;
-      return `Update your base salary from ${formatCurrency(from)}/yr to ${formatCurrency(action.value)}/yr.`;
-    }
-    case "SetPartnerBaseAnnual": {
-      const from = baseline.household.partner?.income.baseAnnual ?? 0;
-      return `Update partner base salary from ${formatCurrency(from)}/yr to ${formatCurrency(action.value)}/yr.`;
-    }
-    case "SetIncomeGrowthRate": {
+function describePatch(patch: AiScenarioPatch, baseline: PlanState): string {
+  const endYearIndexInclusive =
+    patch.type === "AddOneTimeEvent"
+      ? patch.yearIndex
+      : patch.endYearIndexInclusive ?? baseline.endAge - baseline.startAge;
+  switch (patch.type) {
+    case "SetIncomeRange": {
       const from =
-        action.who === "user"
-          ? baseline.household.user.income.incomeGrowthRate
-          : baseline.household.partner?.income.incomeGrowthRate ?? 0;
-      return `Update ${action.who} income growth rate from ${formatRate(from)} to ${formatRate(action.value)}.`;
+        patch.who === "user"
+          ? baseline.household.user.income.baseAnnual
+          : baseline.household.partner?.income.baseAnnual ?? 0;
+      const a0 = baseline.startAge + patch.startYearIndex;
+      const a1 = baseline.startAge + endYearIndexInclusive;
+      return `Set ${patch.who === "partner" ? "partner" : "your"} base salary to ${formatCurrency(
+        patch.baseAnnual,
+      )}/yr for Years ${patch.startYearIndex}–${endYearIndexInclusive} (ages ${a0}–${a1}). Baseline is ${formatCurrency(from)}/yr.`;
     }
-    case "SetLifestyleMonthly": {
-      const from =
-        baseline.expenses.mode === "total"
-          ? baseline.expenses.lifestyleMonthly
-          : baseline.expenses.items.reduce((s, x) => s + x.monthlyAmount, 0);
-      return `Update lifestyle spending from ${formatCurrency(from)}/mo to ${formatCurrency(action.value)}/mo.`;
+    case "SetExpenseRange": {
+      const label =
+        patch.kind === "lifestyle"
+          ? "lifestyle spending"
+          : patch.kind === "housingRent"
+            ? "housing (rent)"
+            : "housing (PITI)";
+      const a0 = baseline.startAge + patch.startYearIndex;
+      const a1 = baseline.startAge + endYearIndexInclusive;
+      return `Set ${label} to ${formatCurrency(patch.monthly)}/mo for Years ${patch.startYearIndex}–${endYearIndexInclusive} (ages ${a0}–${a1}).`;
     }
-    case "SetHousingMonthlyRent": {
-      const from =
-        baseline.household.housing.status === "rent"
-          ? baseline.household.housing.monthlyRent
-          : baseline.household.housing.monthlyPaymentPITI;
-      return `Update housing cost from ${formatCurrency(from)}/mo to ${formatCurrency(action.value)}/mo (modeled as rent).`;
+    case "SetContribRange": {
+      const parts: string[] = [];
+      if (patch.employeePreTaxPct != null) parts.push(`${formatPct(patch.employeePreTaxPct)} pre-tax`);
+      if (patch.employeeRothPct != null) parts.push(`${formatPct(patch.employeeRothPct)} Roth`);
+      if (patch.preTaxDeductionsMonthly != null)
+        parts.push(`${formatCurrency(patch.preTaxDeductionsMonthly)}/mo deductions`);
+      const a0 = baseline.startAge + patch.startYearIndex;
+      const a1 = baseline.startAge + endYearIndexInclusive;
+      return `Set ${patch.who === "partner" ? "partner" : "your"} contribution inputs (${parts.join(", ") || "no changes"}) for Years ${patch.startYearIndex}–${endYearIndexInclusive} (ages ${a0}–${a1}).`;
     }
-    case "SetHousingMonthlyRentFromYearIndex": {
-      const from =
-        baseline.household.housing.status === "rent"
-          ? baseline.household.housing.monthlyRent
-          : baseline.household.housing.monthlyPaymentPITI;
-      const age = baseline.startAge + action.yearIndex;
-      return `Update housing cost from ${formatCurrency(from)}/mo to ${formatCurrency(action.value)}/mo starting Year ${
-        action.yearIndex
-      } (age ${age}), and keep it there for the rest of the projection (modeled as rent).`;
+    case "SetRatesRange": {
+      const parts: string[] = [];
+      if (patch.returnRate != null) parts.push(`returnRate ${formatRate(patch.returnRate)}`);
+      if (patch.cashRate != null) parts.push(`cashRate ${formatRate(patch.cashRate)}`);
+      if (patch.inflationRate != null) parts.push(`inflationRate ${formatRate(patch.inflationRate)}`);
+      if (patch.stateTaxRate != null) parts.push(`stateTaxRate ${formatRate(patch.stateTaxRate)}`);
+      const a0 = baseline.startAge + patch.startYearIndex;
+      const a1 = baseline.startAge + endYearIndexInclusive;
+      return `Set assumptions (${parts.join(", ") || "no changes"}) for Years ${patch.startYearIndex}–${endYearIndexInclusive} (ages ${a0}–${a1}).`;
     }
-    case "SetStateTaxRate": {
-      const from = baseline.assumptions.stateTaxRate ?? 0;
-      return `Update state tax rate from ${from} (${formatRate(from)}) to ${action.value} (${formatRate(action.value)}).`;
-    }
-    case "SetRetirementSplitPct": {
-      const ret =
-        action.who === "user"
-          ? baseline.household.user.income.retirement
-          : baseline.household.partner?.income.retirement;
-      const fromPre = ret?.employeePreTaxContributionPct ?? 0;
-      const fromRoth = ret?.employeeRothContributionPct ?? 0;
-      return `Update ${action.who} retirement split from ${formatPct(fromPre)} pre-tax + ${formatPct(
-        fromRoth,
-      )} Roth to ${formatPct(action.preTaxPct)} pre-tax + ${formatPct(action.rothPct)} Roth.`;
-    }
-    case "SetEmployerMatch": {
-      const ret =
-        action.who === "user"
-          ? baseline.household.user.income.retirement
-          : baseline.household.partner?.income.retirement;
-      const has = ret?.hasEmployerMatch ?? false;
-      const matchPct = ret?.employerMatchPct ?? 0;
-      const upTo = ret?.employerMatchUpToPct ?? 0;
-      if (!action.hasMatch) {
-        return `Turn off ${action.who} employer match (currently ${
-          has ? `${formatPct(matchPct)} match up to ${formatPct(upTo)}` : "off"
-        }).`;
-      }
-      return `Set ${action.who} employer match to ${formatPct(action.matchPct ?? 0)} match up to ${formatPct(
-        action.upToPct ?? 0,
-      )} (currently ${has ? `${formatPct(matchPct)} up to ${formatPct(upTo)}` : "off"}).`;
-    }
-    case "SetPreTaxDeductionsMonthly": {
-      const from =
-        action.who === "user"
-          ? baseline.household.user.income.preTaxDeductionsMonthly ?? 0
-          : baseline.household.partner?.income.preTaxDeductionsMonthly ?? 0;
-      return `Update ${action.who} pre-tax deductions from ${formatCurrency(from)}/mo to ${formatCurrency(
-        action.value,
-      )}/mo.`;
+    case "AddOneTimeEvent": {
+      const age = baseline.startAge + patch.yearIndex;
+      const verb = patch.amount < 0 ? "Spend" : "Add";
+      return `${verb} ${formatCurrency(Math.abs(patch.amount))} as a one-time event in Year ${patch.yearIndex} (age ${age}) — ${patch.label}.`;
     }
     default: {
-      const _exhaustive: never = action;
+      const _exhaustive: never = patch;
       return _exhaustive;
     }
   }
@@ -122,22 +88,25 @@ export function explainAiProposal(args: {
   baselinePlan: PlanState;
   baselineRows: readonly YearRow[];
   scenarioRows: readonly YearRow[];
-  actions: AiAction[];
+  patches: AiScenarioPatch[];
 }): AiProposalExplanation {
-  const { baselinePlan, baselineRows, scenarioRows, actions } = args;
+  const { baselinePlan, baselineRows, scenarioRows, patches } = args;
 
-  const changes = actions.map((a) => describeAction(a, baselinePlan));
+  const changes = patches.map((p) => describePatch(p, baselinePlan));
 
   const lastBase = baselineRows[baselineRows.length - 1];
   const lastScen = scenarioRows[scenarioRows.length - 1];
 
-  const focusAction =
-    actions.find((a) => a.type === "QuitPartnerJobFromYearIndex") ??
-    actions.find((a) => a.type === "SetHousingMonthlyRentFromYearIndex");
   const focusYearIndex =
-    focusAction?.type === "QuitPartnerJobFromYearIndex" || focusAction?.type === "SetHousingMonthlyRentFromYearIndex"
-      ? focusAction.yearIndex
-      : 0;
+    patches.length === 0
+      ? 0
+      : Math.max(
+          0,
+          Math.min(
+            ...patches.map((p) => (p.type === "AddOneTimeEvent" ? p.yearIndex : p.startYearIndex)),
+            baselineRows.length - 1,
+          ),
+        );
   const focusBase = baselineRows[focusYearIndex];
   const focusScen = scenarioRows[focusYearIndex];
 
