@@ -1,4 +1,4 @@
-import type { AiScenarioPatch } from "@/ai/types";
+import type { AiScenarioPatch, TargetedOverride } from "@/ai/types";
 import type { AiPromptPayload } from "@/ai/promptPayload";
 
 const LARGE_ONE_TIME_SPEND = 50_000;
@@ -7,6 +7,15 @@ export function isPartnerPatch(patch: AiScenarioPatch): boolean {
   return (
     (patch.type === "SetIncomeRange" && patch.who === "partner") ||
     (patch.type === "SetContribRange" && patch.who === "partner")
+  );
+}
+
+export function isPartnerOverrideTarget(override: TargetedOverride): boolean {
+  return (
+    override.target === "income.partner.base" ||
+    override.target === "income.partner.bonus" ||
+    override.target === "income.partner.base.growthPct" ||
+    override.target === "income.partner.bonus.growthPct"
   );
 }
 
@@ -45,6 +54,24 @@ export function computeConfirmationsRequired(
     }
   }
 
+  return out;
+}
+
+export function computeConfirmationsRequiredFromOverrides(
+  overrides: readonly TargetedOverride[],
+  _ctx: AiPromptPayload,
+): string[] {
+  const out: string[] = [];
+  const hasPartner = overrides.some(isPartnerOverrideTarget);
+  if (hasPartner) out.push("Confirm: this proposal changes partner inputs.");
+  for (const o of overrides) {
+    if ((o.target === "income.user.base" || o.target === "income.partner.base") && o.kind === "set" && o.value === 0) {
+      const label = o.target.startsWith("income.partner") ? "partner" : "your";
+      if (!out.some((s) => s.includes(`${label} income to $0`))) {
+        out.push(`Confirm: set ${label} base income to $0 starting at age ${o.fromAge}.`);
+      }
+    }
+  }
   return out;
 }
 

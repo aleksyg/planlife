@@ -1,13 +1,22 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { simulatePlan } from "@/engine";
 import type { YearRow } from "@/engine";
+import type { TargetedOverride } from "@/ai/types";
 import { loadBaselineFromStorage } from "@/app/planStateStorage";
+import {
+  loadScenarioCards,
+  saveScenarioCards,
+  createScenarioCard,
+} from "@/app/scenarioCardsStorage";
+import type { ScenarioCard } from "@/scenario/modifiers";
+import { getScenarioYearInputs } from "@/scenario/modifiers";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ProjectionBars } from "@/components/app/ProjectionBars";
+import { ScenarioCardsList } from "@/components/app/ScenarioCardsList";
 import { ChatPanel } from "@/components/app/chat/ChatPanel";
 
 function formatCurrency(n: number): string {
@@ -21,9 +30,66 @@ function formatCurrency(n: number): string {
 
 export default function PlanYourLifePage() {
   const plan = loadBaselineFromStorage();
+  const [cards, setCards] = useState<ScenarioCard[]>(() => loadScenarioCards());
+  const [draftOverrides, setDraftOverrides] = useState<TargetedOverride[] | null>(null);
+  const clearDraftRef = useRef<(() => void) | null>(null);
+
+  // Baseline: immutable; never mutated by scenario.
   const rows: YearRow[] = plan ? simulatePlan(plan) : [];
-  const [scenarioRows, setScenarioRows] = useState<YearRow[] | null>(null);
-  const currentRows = scenarioRows ?? rows;
+  // Scenario = baseline + enabled modifiers (+ draft last). Rebuilt from scratch every time.
+  const scenarioYearInputs = useMemo(
+    () => (plan ? getScenarioYearInputs(plan, cards, draftOverrides) : []),
+    [plan, cards, draftOverrides],
+  );
+  // When no active modifiers, scenario equals baseline (use baseline rows). Never leave scenario empty.
+  const scenarioRows: YearRow[] =
+    plan && scenarioYearInputs.length > 0
+      ? simulatePlan(plan, { yearInputs: scenarioYearInputs })
+      : rows;
+  const currentRows = scenarioRows;
+  const hasScenario = cards.some((c) => c.enabled) || (draftOverrides?.length ?? 0) > 0;
+
+  const persistCards = useCallback((next: ScenarioCard[]) => {
+    setCards(next);
+    saveScenarioCards(next);
+  }, []);
+
+  const handleToggleCard = useCallback(
+    (id: string, enabled: boolean) => {
+      setCards((prev) => {
+        const next = prev.map((c) => (c.id === id ? { ...c, enabled } : c));
+        saveScenarioCards(next);
+        return next;
+      });
+    },
+    [],
+  );
+
+  const handleDeleteCard = useCallback((id: string) => {
+    setCards((prev) => {
+      const next = prev.filter((c) => c.id !== id);
+      saveScenarioCards(next);
+      return next;
+    });
+  }, []);
+
+  const handleSaveDraft = useCallback(
+    (overrides: TargetedOverride[], title?: string, summary?: string) => {
+      const card = createScenarioCard({
+        title: title?.trim() || "AI change",
+        summary: summary?.trim() ?? "",
+        overrides,
+      });
+      setCards((prev) => {
+        const next = [...prev, card];
+        saveScenarioCards(next);
+        return next;
+      });
+      setDraftOverrides(null);
+      clearDraftRef.current?.();
+    },
+    [],
+  );
 
   if (!plan) {
     return (
@@ -38,7 +104,7 @@ export default function PlanYourLifePage() {
   }
 
   const lastBase = rows[rows.length - 1];
-  const lastScen = scenarioRows ? scenarioRows[scenarioRows.length - 1] : null;
+  const lastScen = scenarioRows.length > 0 ? scenarioRows[scenarioRows.length - 1] : null;
   const delta = lastBase && lastScen ? lastScen.endNetWorth - lastBase.endNetWorth : null;
 
   return (
@@ -47,30 +113,29 @@ export default function PlanYourLifePage() {
         <div className="space-y-4">
         <Card>
           <CardHeader>
-            <div className="flex items-center justify-between gap-2">
-              <CardTitle>Life Decisions</CardTitle>
-              <Button variant="outline" size="sm" className="rounded-2xl">
-                + Add Decision
-              </Button>
-            </div>
-            <CardDescription>Common scenarios (placeholders for now)</CardDescription>
+            <CardTitle>Scenario changes</CardTitle>
+            <CardDescription>
+              Toggle cards on/off. Scenario = baseline + enabled cards (later wins). Draft previews last.
+            </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-3">
-            <button className="w-full rounded-xl border border-border bg-background px-3 py-3 text-left hover:bg-muted/20">
-              <div className="text-sm font-medium">Buy a Home</div>
-              <div className="mt-1 text-xs text-muted-foreground">Purchase in 2028 for $650k</div>
-            </button>
-            <button className="w-full rounded-xl border border-border bg-background px-3 py-3 text-left hover:bg-muted/20">
-              <div className="text-sm font-medium">Have a Child</div>
-              <div className="mt-1 text-xs text-muted-foreground">Expected in 2026</div>
-            </button>
-            <div className="rounded-xl border border-dashed border-border p-4 text-center text-sm text-muted-foreground">
-              Explore scenarios
-            </div>
+          <CardContent>
+            <ScenarioCardsList
+              cards={cards}
+              onToggle={handleToggleCard}
+              onDelete={handleDeleteCard}
+            />
           </CardContent>
         </Card>
 
-        <ChatPanel baselinePlan={plan} baselineRows={rows} onScenarioRowsChange={setScenarioRows} />
+        <ChatPanel
+          baselinePlan={plan}
+          baselineRows={rows}
+          cards={cards}
+          draftOverrides={draftOverrides}
+          onDraftChange={setDraftOverrides}
+          onSaveDraft={handleSaveDraft}
+          clearDraftRef={clearDraftRef}
+        />
         </div>
 
         <div className="space-y-4">
@@ -92,9 +157,59 @@ export default function PlanYourLifePage() {
 
           <Card>
             <CardHeader>
+              <CardTitle>Income by year</CardTitle>
+              <CardDescription>
+                Baseline vs scenario gross income for review
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="overflow-x-auto rounded-lg border border-border">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border bg-muted/30">
+                      <th className="px-3 py-2 text-left font-medium">Age</th>
+                      <th className="px-3 py-2 text-right font-medium">User baseline</th>
+                      <th className="px-3 py-2 text-right font-medium">User scenario</th>
+                      <th className="px-3 py-2 text-right font-medium">Partner baseline</th>
+                      <th className="px-3 py-2 text-right font-medium">Partner scenario</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((row, i) => {
+                      const scen = scenarioRows[i];
+                      const userBase = row.userGrossIncome ?? 0;
+                      const userScen = scen?.userGrossIncome ?? 0;
+                      const userHasDiff = hasScenario && Math.abs(userScen - userBase) > 0.5;
+                      const partnerBase = row.partnerGrossIncome ?? 0;
+                      const partnerScen = scen?.partnerGrossIncome ?? 0;
+                      const partnerHasDiff = hasScenario && Math.abs(partnerScen - partnerBase) > 0.5;
+                      return (
+                        <tr key={row.yearIndex} className="border-b border-border/70 last:border-0">
+                          <td className="px-3 py-1.5">{row.age}</td>
+                          <td className="px-3 py-1.5 text-right tabular-nums">{formatCurrency(userBase)}</td>
+                          <td className={`px-3 py-1.5 text-right tabular-nums ${userHasDiff ? "font-medium" : ""}`}>
+                            {formatCurrency(userScen)}
+                          </td>
+                          <td className="px-3 py-1.5 text-right tabular-nums">
+                            {plan.household.hasPartner ? formatCurrency(partnerBase) : "—"}
+                          </td>
+                          <td className={`px-3 py-1.5 text-right tabular-nums ${partnerHasDiff ? "font-medium" : ""}`}>
+                            {plan.household.hasPartner ? formatCurrency(partnerScen) : "—"}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
               <CardTitle>Chart preview</CardTitle>
               <CardDescription>
-                Net worth projection ({scenarioRows ? "scenario" : "baseline"})
+                Net worth projection ({hasScenario ? "scenario" : "baseline"})
               </CardDescription>
             </CardHeader>
             <CardContent>

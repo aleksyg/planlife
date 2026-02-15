@@ -1,14 +1,14 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { PlanState } from "@/engine";
 import type { YearRow } from "@/engine";
 import type { AiChatMessage, AiPlannerResponse } from "@/ai/types";
+import type { TargetedOverride } from "@/ai/types";
 import { buildAiPromptPayload } from "@/ai/promptPayload";
 import { explainAiProposal } from "@/ai/describeProposal";
 import { simulatePlan } from "@/engine";
-import { applyScenarioPatches } from "@/scenario/applyPatches";
-import { materializeYearInputs } from "@/scenario/materializeYearInputs";
+import { buildScenarioYearInputsFromOverrides } from "@/rulespec";
 import type { ChatMessage } from "./types";
 
 function makeId(): string {
@@ -23,31 +23,30 @@ function toAiThread(messages: readonly ChatMessage[]): AiChatMessage[] {
 function assistantTextFromResponse(resp: AiPlannerResponse): string {
   if (resp.mode === "clarify") {
     const parts: string[] = [];
-    parts.push("I need a bit more detail to model that.");
     if (resp.questions?.length) {
-      parts.push("\n**Questions**");
-      parts.push(resp.questions.map((q) => `- ${q}`).join("\n"));
+      parts.push(resp.questions.map((q) => `• ${q}`).join("\n"));
     }
     if (resp.assumptions?.length) {
-      parts.push("\n**Assumptions (so far)**");
-      parts.push(resp.assumptions.map((a) => `- ${a}`).join("\n"));
+      parts.push("Assumptions so far:\n" + resp.assumptions.map((a) => `• ${a}`).join("\n"));
     }
-    return parts.join("\n\n").trim();
+    return parts.length ? parts.join("\n\n") : "I need a bit more detail to model that.";
   }
 
-  // propose
+  // propose — keep compact; details are in the proposal card
   if (resp.draftScenarioSummary) {
-    return `${resp.draftScenarioSummary}\n\nReview the proposal below and apply it when ready.`;
+    return resp.draftScenarioSummary;
   }
-  return "I put together a proposal. Review it below and apply it when ready.";
+  return "Proposal ready. Review the card below and save as new change when ready.";
 }
 
 export function usePlannerChat(args: {
   baselinePlan: PlanState;
   baselineRows: readonly YearRow[];
   onScenarioRowsChange?: (rows: YearRow[] | null) => void;
+  onDraftChange?: (overrides: TargetedOverride[] | null) => void;
+  clearDraftRef?: React.MutableRefObject<(() => void) | null>;
 }) {
-  const { baselinePlan, baselineRows, onScenarioRowsChange } = args;
+  const { baselinePlan, baselineRows, onScenarioRowsChange, onDraftChange, clearDraftRef } = args;
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [composerValue, setComposerValue] = useState("");
@@ -57,9 +56,17 @@ export function usePlannerChat(args: {
   const [appliedResponse, setAppliedResponse] = useState<AiPlannerResponse | null>(null);
   const [confirmChecks, setConfirmChecks] = useState<Record<string, boolean>>({});
 
-  const proposePatches = useMemo(() => {
-    return response?.mode === "propose" ? response.patches : [];
+  const proposeOverrides = useMemo(() => {
+    return response?.mode === "propose" ? response.overrides : [];
   }, [response]);
+
+  useEffect(() => {
+    onDraftChange?.(proposeOverrides.length > 0 ? proposeOverrides : null);
+  }, [proposeOverrides, onDraftChange]);
+
+  useEffect(() => {
+    if (clearDraftRef) clearDraftRef.current = clearDraft;
+  }, [clearDraftRef, clearDraft]);
 
   const confirmationsRequired = useMemo(() => {
     return response?.mode === "propose" ? (response.confirmationsRequired ?? []) : [];
@@ -70,30 +77,29 @@ export function usePlannerChat(args: {
     confirmationsRequired.every((c) => Boolean(confirmChecks[c]));
 
   const previewRows = useMemo(() => {
-    if (!response || response.mode !== "propose" || proposePatches.length === 0) return null;
+    if (!response || response.mode !== "propose" || proposeOverrides.length === 0) return null;
     try {
-      const overrides = applyScenarioPatches({}, proposePatches);
-      const yearInputs = materializeYearInputs(baselinePlan, overrides);
+      const yearInputs = buildScenarioYearInputsFromOverrides(baselinePlan, proposeOverrides);
       return simulatePlan(baselinePlan, { yearInputs });
     } catch {
       return null;
     }
-  }, [baselinePlan, proposePatches, response]);
+  }, [baselinePlan, proposeOverrides, response]);
 
   const explanation = useMemo(() => {
-    if (!response || response.mode !== "propose" || proposePatches.length === 0) return null;
+    if (!response || response.mode !== "propose" || proposeOverrides.length === 0) return null;
     if (!previewRows) return null;
     try {
       return explainAiProposal({
         baselinePlan,
         baselineRows,
         scenarioRows: previewRows,
-        patches: proposePatches,
+        overrides: proposeOverrides,
       });
     } catch {
       return null;
     }
-  }, [baselinePlan, baselineRows, previewRows, proposePatches, response]);
+  }, [baselinePlan, baselineRows, previewRows, proposeOverrides, response]);
 
   async function send() {
     const userText = composerValue.trim();
@@ -159,6 +165,11 @@ export function usePlannerChat(args: {
     onScenarioRowsChange?.(null);
   }
 
+  function clearDraft() {
+    setResponse(null);
+    setConfirmChecks({});
+  }
+
   return {
     messages,
     composerValue,
@@ -176,6 +187,8 @@ export function usePlannerChat(args: {
     toggleConfirm,
     apply,
     clearApplied,
+    clearDraft,
+    draftOverrides: proposeOverrides.length > 0 ? proposeOverrides : null,
   };
 }
 

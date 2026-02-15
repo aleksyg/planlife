@@ -4,7 +4,7 @@ import { applyOverridesToRuleSpecInputs } from "./applyOverrides";
 import { materializeYearInputs } from "./materializeYearInputs";
 import type { TargetedOverride } from "./types";
 
-export type { Timeline, GrowthRule, Override, TargetedOverride, TargetKey, ComponentSpec, RuleSpecInputs } from "./types";
+export type { Timeline, GrowthRule, Override, GrowthOverride, TargetedOverride, TargetKey, ComponentSpec, RuleSpecInputs } from "./types";
 export { makeTimeline, yearIndexFromAge } from "./timeline";
 export { buildSeries } from "./buildSeries";
 export { deriveRuleSpecInputsFromPlanState } from "./deriveFromPlanState";

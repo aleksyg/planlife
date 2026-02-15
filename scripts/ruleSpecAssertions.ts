@@ -5,7 +5,6 @@ import {
   buildSeries,
   deriveRuleSpecInputsFromPlanState,
 } from "../src/rulespec/index";
-import type { Override } from "../src/rulespec/types";
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
@@ -16,11 +15,12 @@ function assertApprox(actual: number, expected: number, eps: number, message: st
   assert(ok, `${message}. expected=${expected} actual=${actual} diff=${actual - expected}`);
 }
 
-function mkPlan(): PlanState {
+function mkPlan(overrides?: { endAge?: number }): PlanState {
+  const endAge = overrides?.endAge ?? 33;
   return {
     asOfYearMonth: "2026-02",
     startAge: 30,
-    endAge: 33,
+    endAge,
     household: {
       user: {
         age: 30,
@@ -108,37 +108,91 @@ function testOpenEndedSetAnchorsAndRegrows() {
 function testRangedAddAndMult() {
   const plan = mkPlan();
   const yi = buildScenarioYearInputsFromOverrides(plan, [
-    { target: "spend.lifestyle", kind: "add", fromAge: 31, toAge: 32, value: 500 }, // +$500/mo
-    { target: "income.user.base", kind: "mult", fromAge: 32, toAge: 33, value: 1.1 }, // +10% for ages 32-33
+    { target: "spend.lifestyle", kind: "add", fromAge: 31, toAge: 32, value: 500 }, // +$500/mo from 31, compounds (no revert)
+    { target: "income.user.base", kind: "mult", fromAge: 32, toAge: 33, value: 1.1 }, // +10% at 32, compounds (no revert)
   ]);
   const rows = simulatePlan(plan, { yearInputs: yi });
   const base = simulatePlan(plan);
 
-  // Lifestyle outflow bump only for years 31-32 => yearIndex 1-2
+  // Lifestyle: add 500 at 31, then compound forward (growth 0 => flat 3500)
   assertApprox(rows[0]!.lifestyleMonthly, base[0]!.lifestyleMonthly, 0.01, "yearIndex 0 lifestyle unchanged");
   assertApprox(rows[1]!.lifestyleMonthly, base[1]!.lifestyleMonthly + 500, 0.01, "yearIndex 1 lifestyle +500");
-  assertApprox(rows[2]!.lifestyleMonthly, base[2]!.lifestyleMonthly + 500, 0.01, "yearIndex 2 lifestyle +500");
-  assertApprox(rows[3]!.lifestyleMonthly, base[3]!.lifestyleMonthly, 0.01, "yearIndex 3 lifestyle unchanged");
+  assertApprox(rows[2]!.lifestyleMonthly, 3500, 0.01, "yearIndex 2 compounds from 3500 (flat)");
+  assertApprox(rows[3]!.lifestyleMonthly, 3500, 0.01, "yearIndex 3 continues from anchor (no revert)");
 }
 
-function testRangedSetRejected() {
+function testSalaryDropPermanently() {
+  const plan = mkPlan({ endAge: 38 });
+  const yi = buildScenarioYearInputsFromOverrides(plan, [
+    { target: "income.user.base", kind: "set", fromAge: 33, value: 60_000 },
+  ]);
+  const rows = simulatePlan(plan, { yearInputs: yi });
+  const bonusY3 = 20_000 * Math.pow(1.05, 3);
+  const bonusY4 = 20_000 * Math.pow(1.05, 4);
+  assertApprox(rows[3]!.grossIncome, 60_000 + bonusY3, 0.02, "yearIndex 3 (age 33) anchor 60k + bonus");
+  assertApprox(rows[4]!.grossIncome, 60_000 * 1.05 + bonusY4, 0.02, "yearIndex 4 regrows from anchor at 5%");
+}
+
+function testRaiseInThreeYearsPermanently() {
+  const plan = mkPlan({ endAge: 38 });
+  const yi = buildScenarioYearInputsFromOverrides(plan, [
+    { target: "income.user.base", kind: "set", fromAge: 33, value: 150_000 },
+  ]);
+  const rows = simulatePlan(plan, { yearInputs: yi });
+  const bonusY3 = 20_000 * Math.pow(1.05, 3);
+  const bonusY4 = 20_000 * Math.pow(1.05, 4);
+  assertApprox(rows[3]!.grossIncome, 150_000 + bonusY3, 0.02, "yearIndex 3 (age 33) anchor 150k + bonus");
+  assertApprox(rows[4]!.grossIncome, 150_000 * 1.05 + bonusY4, 0.02, "yearIndex 4 regrows from anchor at 5%");
+}
+
+function testGrowthFourPercentThenTwoPercent() {
+  const plan = mkPlan({ endAge: 45 });
+  const yi = buildScenarioYearInputsFromOverrides(plan, [
+    { target: "income.user.base.growthPct", kind: "set", fromAge: 33, value: 0.04 },
+    { target: "income.user.base.growthPct", kind: "set", fromAge: 40, value: 0.02 },
+  ]);
+  const rows = simulatePlan(plan, { yearInputs: yi });
+  const base = simulatePlan(plan);
+  assertApprox(rows[2]!.grossIncome, base[2]!.grossIncome, 0.02, "yearIndex 2 still baseline 5%");
+  const baseAt33 = 100_000 * Math.pow(1.05, 2) * 1.04;
+  const baseAt34 = baseAt33 * 1.04;
+  const baseAt40 = 100_000 * Math.pow(1.05, 2) * Math.pow(1.04, 7) * 1.02;
+  const baseAt41 = baseAt40 * 1.02;
+  const bonus = (y: number) => 20_000 * Math.pow(1.05, y);
+  assertApprox(rows[3]!.grossIncome, baseAt33 + bonus(3), 0.02, "yearIndex 3 first year at 4%");
+  assertApprox(rows[4]!.grossIncome, baseAt34 + bonus(4), 0.02, "yearIndex 4 grows at 4%");
+  assertApprox(rows[10]!.grossIncome, baseAt40 + bonus(10), 0.02, "yearIndex 10 (age 40) last year at 4%");
+  assertApprox(rows[11]!.grossIncome, baseAt41 + bonus(11), 0.02, "yearIndex 11 grows at 2%");
+}
+
+function testMultThenSetCollision() {
+  const plan = mkPlan({ endAge: 38 });
+  const yi = buildScenarioYearInputsFromOverrides(plan, [
+    { target: "income.user.base", kind: "mult", fromAge: 32, value: 1.2 },
+    { target: "income.user.base", kind: "set", fromAge: 33, value: 130_000 },
+  ]);
+  const rows = simulatePlan(plan, { yearInputs: yi });
+  const baseAt32 = 100_000 * Math.pow(1.05, 2);
+  const bonusY2 = 20_000 * Math.pow(1.05, 2);
+  const bonusY3 = 20_000 * Math.pow(1.05, 3);
+  assertApprox(rows[2]!.grossIncome, baseAt32 * 1.2 + bonusY2, 0.02, "yearIndex 2 mult applied, then regrows");
+  assertApprox(rows[3]!.grossIncome, 130_000 + bonusY3, 0.02, "yearIndex 3 set overrides anchor 130k");
+  assertApprox(rows[4]!.grossIncome, 130_000 * 1.05 + 20_000 * Math.pow(1.05, 4), 0.02, "yearIndex 4 regrows from set anchor");
+}
+
+function testRangedSetThenCompoundForward() {
   const plan = mkPlan();
-  const specs = deriveRuleSpecInputsFromPlanState(plan);
-  const invalidOverride: unknown = { kind: "set", fromAge: 31, toAge: 32, value: 123 };
-  const bad = {
-    ...specs.income.user.base,
-    overrides: [
-      // Bypass types on purpose; must throw at runtime.
-      invalidOverride as Override,
-    ],
-  };
-  let threw = false;
-  try {
-    buildSeries(bad, specs.timeline);
-  } catch {
-    threw = true;
-  }
-  assert(threw, "ranged set must throw");
+  // Ranged set: anchor at 31, value 80k; applies only at 31, then we compound through 32 and beyond (no revert).
+  const yi = buildScenarioYearInputsFromOverrides(plan, [
+    { target: "income.user.base", kind: "set", fromAge: 31, toAge: 32, value: 80_000 },
+  ]);
+  const rows = simulatePlan(plan, { yearInputs: yi });
+  const bonusY1 = 20_000 * 1.05;
+  const bonusY2 = 20_000 * 1.05 * 1.05;
+  const bonusY3 = 20_000 * Math.pow(1.05, 3);
+  assertApprox(rows[1]!.grossIncome, 80_000 + bonusY1, 0.02, "yearIndex 1 anchor 80k + bonus");
+  assertApprox(rows[2]!.grossIncome, 80_000 * 1.05 + bonusY2, 0.02, "yearIndex 2 regrows within range");
+  assertApprox(rows[3]!.grossIncome, 80_000 * 1.05 * 1.05 + bonusY3, 0.02, "yearIndex 3 compounds from range end (anchor+growth)");
 }
 
 function main() {
@@ -146,7 +200,11 @@ function main() {
   testNonDestructiveBonusMerge();
   testOpenEndedSetAnchorsAndRegrows();
   testRangedAddAndMult();
-  testRangedSetRejected();
+  testRangedSetThenCompoundForward();
+  testSalaryDropPermanently();
+  testRaiseInThreeYearsPermanently();
+  testGrowthFourPercentThenTwoPercent();
+  testMultThenSetCollision();
   console.log("ruleSpec assertions: OK");
 }
 

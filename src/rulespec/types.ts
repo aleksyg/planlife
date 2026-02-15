@@ -9,15 +9,22 @@ export type GrowthRule =
   | { type: "flat"; annualAmount: number }; // dollars per year
 
 export type Override =
-  | { kind: "set"; fromAge: number; value: number; toAge?: undefined }
+  | { kind: "set"; fromAge: number; value: number; toAge?: number }
   | { kind: "add"; fromAge: number; value: number; toAge?: number }
   | { kind: "mult"; fromAge: number; value: number; toAge?: number };
+
+/** Growth rate override: from this age onward use this rate (e.g. 0.04 for 4%). */
+export type GrowthOverride = { fromAge: number; value: number };
 
 export type TargetKey =
   | "income.user.base"
   | "income.user.bonus"
   | "income.partner.base"
   | "income.partner.bonus"
+  | "income.user.base.growthPct"
+  | "income.partner.base.growthPct"
+  | "income.user.bonus.growthPct"
+  | "income.partner.bonus.growthPct"
   | "spend.lifestyle"
   | "spend.housing";
 
@@ -27,6 +34,8 @@ export type ComponentSpec = {
   startValue: number;
   growth: GrowthRule;
   overrides: Override[];
+  /** First-class growth rate overrides (pct components only). value = decimal e.g. 0.04. */
+  growthOverrides: GrowthOverride[];
 };
 
 export type RuleSpecInputs = {

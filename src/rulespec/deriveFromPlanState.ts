@@ -18,6 +18,7 @@ function mkComponentSpec(args: { startValue: number; growthPct: number }): Compo
     startValue: args.startValue,
     growth: { type: "pct", annualPct: args.growthPct },
     overrides: [],
+    growthOverrides: [],
   };
 }
 

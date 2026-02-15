@@ -1,6 +1,6 @@
 import type { PlanState } from "@/engine";
 import type { YearRow } from "@/engine";
-import type { AiScenarioPatch } from "./types";
+import type { AiScenarioPatch, TargetedOverride } from "./types";
 
 function formatCurrency(n: number): string {
   return new Intl.NumberFormat("en-US", {
@@ -79,6 +79,53 @@ function describePatch(patch: AiScenarioPatch, baseline: PlanState): string {
   }
 }
 
+export function describeOverride(override: TargetedOverride, plan: PlanState): string {
+  const isGrowthPct = override.target.endsWith(".growthPct");
+  const whoLabel =
+    override.target.startsWith("income.partner.") ? "partner" : "your";
+  const range =
+    override.toAge != null
+      ? ` from age ${override.fromAge} to ${override.toAge}`
+      : ` starting at age ${override.fromAge} and grow from there`;
+
+  if (isGrowthPct) {
+    const pct = (override.value * 100).toFixed(1);
+    const component =
+      override.target.includes(".base.") ? "base income" : "bonus";
+    return `Change ${whoLabel} ${component} growth to ${pct}%${range.replace(" and grow from there", " onward")}.`;
+  }
+
+  if (override.target === "income.user.base" || override.target === "income.partner.base") {
+    if (override.kind === "set")
+      return `Set ${whoLabel} base salary to ${formatCurrency(override.value)}/yr${range}.`;
+    if (override.kind === "add")
+      return `Add ${formatCurrency(override.value)}/yr to ${whoLabel} base at age ${override.fromAge} and compound from there.`;
+    return `Multiply ${whoLabel} base by ${override.value.toFixed(2)} at age ${override.fromAge} and compound from there.`;
+  }
+  if (override.target === "income.user.bonus" || override.target === "income.partner.bonus") {
+    if (override.kind === "set")
+      return `Set ${whoLabel} bonus to ${formatCurrency(override.value)}/yr${range}.`;
+    if (override.kind === "add")
+      return `Add ${formatCurrency(override.value)}/yr to ${whoLabel} bonus at age ${override.fromAge}.`;
+    return `Multiply ${whoLabel} bonus by ${override.value.toFixed(2)} at age ${override.fromAge}.`;
+  }
+  if (override.target === "spend.lifestyle") {
+    if (override.kind === "set")
+      return `Set lifestyle spending to ${formatCurrency(override.value)}/mo${range}.`;
+    if (override.kind === "add")
+      return `Add ${formatCurrency(override.value)}/mo to lifestyle at age ${override.fromAge}.`;
+    return `Multiply lifestyle by ${override.value.toFixed(2)} at age ${override.fromAge}.`;
+  }
+  if (override.target === "spend.housing") {
+    if (override.kind === "set")
+      return `Set housing to ${formatCurrency(override.value)}/mo${range}.`;
+    if (override.kind === "add")
+      return `Add ${formatCurrency(override.value)}/mo to housing at age ${override.fromAge}.`;
+    return `Multiply housing by ${override.value.toFixed(2)} at age ${override.fromAge}.`;
+  }
+  return `Override ${override.target} at age ${override.fromAge}.`;
+}
+
 export type AiProposalExplanation = {
   changes: string[];
   implications: string[];
@@ -88,22 +135,22 @@ export function explainAiProposal(args: {
   baselinePlan: PlanState;
   baselineRows: readonly YearRow[];
   scenarioRows: readonly YearRow[];
-  patches: AiScenarioPatch[];
+  overrides: TargetedOverride[];
 }): AiProposalExplanation {
-  const { baselinePlan, baselineRows, scenarioRows, patches } = args;
+  const { baselinePlan, baselineRows, scenarioRows, overrides } = args;
 
-  const changes = patches.map((p) => describePatch(p, baselinePlan));
+  const changes = overrides.map((o) => describeOverride(o, baselinePlan));
 
   const lastBase = baselineRows[baselineRows.length - 1];
   const lastScen = scenarioRows[scenarioRows.length - 1];
 
   const focusYearIndex =
-    patches.length === 0
+    overrides.length === 0
       ? 0
       : Math.max(
           0,
           Math.min(
-            ...patches.map((p) => (p.type === "AddOneTimeEvent" ? p.yearIndex : p.startYearIndex)),
+            ...overrides.map((o) => o.fromAge - baselinePlan.startAge),
             baselineRows.length - 1,
           ),
         );

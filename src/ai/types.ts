@@ -1,6 +1,8 @@
 export type Who = "user" | "partner";
 
 export type AiScenarioPatch = import("@/scenario/types").ScenarioPatch;
+export type TargetedOverride = import("@/rulespec/types").TargetedOverride;
+export type TargetKey = import("@/rulespec/types").TargetKey;
 
 export type AiAction =
   | { type: "QuitPartnerJobFromYearIndex"; yearIndex: number }
@@ -41,7 +43,7 @@ export type AiPlannerResponse =
   | {
       mode: "propose";
       assumptions: string[];
-      patches: AiScenarioPatch[];
+      overrides: TargetedOverride[];
       /** Optional short plain-English scenario summary. */
       draftScenarioSummary?: string;
       /** If present and non-empty, UI must require checkboxes before enabling Apply. */
