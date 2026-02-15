@@ -4,6 +4,11 @@ import type { AiPromptPayload } from "@/ai/promptPayload";
 import { getLastUserText, promptMentionsPartner } from "@/ai/compiler/promptFacts";
 import { computeConfirmationsRequiredFromOverrides, isPartnerOverrideTarget } from "@/ai/compiler/confirmations";
 import { deriveIncomeIntent, type IncomeIntent } from "@/ai/compiler/incomeIntent";
+import {
+  materializeTotalCompConstraint,
+  type TotalCompConstraint,
+  type ResolutionPolicy,
+} from "@/ai/compiler/totalCompConstraint";
 
 type RequestBody = {
   messages: AiChatMessage[];
@@ -95,6 +100,30 @@ function getJsonSchema() {
           },
           required: ["fromAge", "value", "who"],
         },
+        totalCompConstraint: {
+          type: ["object", "null"],
+          additionalProperties: false,
+          properties: {
+            person: { enum: ["user", "partner"] },
+            milestones: {
+              type: "array",
+              items: {
+                type: "object",
+                additionalProperties: false,
+                properties: { age: { type: "number" }, value: { type: "number" } },
+                required: ["age", "value"],
+              },
+            },
+            cap: {
+              type: ["object", "null"],
+              additionalProperties: false,
+              properties: { value: { type: "number" }, startAge: { type: "number" } },
+              required: ["value", "startAge"],
+            },
+            resolutionPolicy: { enum: ["BASE_ONLY", "BONUS_ONLY", "PROPORTIONAL", "ASK"] },
+          },
+          required: ["person", "milestones", "cap", "resolutionPolicy"],
+        },
       },
       required: [
         "mode",
@@ -104,6 +133,7 @@ function getJsonSchema() {
         "impactPreviewRequest",
         "overrides",
         "totalCompTarget",
+        "totalCompConstraint",
       ],
     },
   } as const;
@@ -239,6 +269,35 @@ function validateAndNormalizeOverride(
   };
 }
 
+function parseTotalCompConstraint(obj: unknown): TotalCompConstraint | null {
+  if (!isRecord(obj)) return null;
+  const person = obj["person"];
+  if (person !== "user" && person !== "partner") return null;
+  const milestonesRaw = obj["milestones"];
+  if (!Array.isArray(milestonesRaw)) return null;
+  const milestones: { age: number; value: number }[] = [];
+  for (const m of milestonesRaw) {
+    if (isRecord(m) && typeof m["age"] === "number" && typeof m["value"] === "number") {
+      milestones.push({ age: m["age"], value: m["value"] });
+    }
+  }
+  if (milestones.length === 0) return null;
+  let cap: { value: number; startAge: number } | undefined;
+  const capRaw = obj["cap"];
+  if (isRecord(capRaw) && typeof capRaw["value"] === "number" && typeof capRaw["startAge"] === "number") {
+    cap = { value: capRaw["value"], startAge: capRaw["startAge"] };
+  }
+  const resolutionPolicy = obj["resolutionPolicy"];
+  const rp =
+    resolutionPolicy === "BASE_ONLY" ||
+    resolutionPolicy === "BONUS_ONLY" ||
+    resolutionPolicy === "PROPORTIONAL" ||
+    resolutionPolicy === "ASK"
+      ? (resolutionPolicy as ResolutionPolicy)
+      : undefined;
+  return { person, milestones, cap, resolutionPolicy: rp };
+}
+
 function validatePlannerShape(obj: unknown): {
   mode: "clarify" | "propose";
   questions: string[] | null;
@@ -247,6 +306,7 @@ function validatePlannerShape(obj: unknown): {
   impactPreviewRequest: { focusYearIndex: number | null } | null;
   overrides: unknown[] | null;
   totalCompTarget: { fromAge: number; value: number; who: "user" | "partner" } | null;
+  totalCompConstraint: TotalCompConstraint | null;
 } | null {
   if (!isRecord(obj)) return null;
   const mode = obj["mode"];
@@ -264,7 +324,8 @@ function validatePlannerShape(obj: unknown): {
   if (isRecord(tct) && typeof tct["fromAge"] === "number" && typeof tct["value"] === "number" && (tct["who"] === "user" || tct["who"] === "partner")) {
     totalCompTarget = { fromAge: tct["fromAge"], value: tct["value"], who: tct["who"] };
   }
-  return { mode, questions, assumptions, draftScenarioSummary, impactPreviewRequest, overrides, totalCompTarget };
+  const totalCompConstraint = parseTotalCompConstraint(obj["totalCompConstraint"]);
+  return { mode, questions, assumptions, draftScenarioSummary, impactPreviewRequest, overrides, totalCompTarget, totalCompConstraint };
 }
 
 /** Deterministic: base so that base + bonusAtFromAge = targetTotalComp. Uses bonus at same age from context, or specifiedBonus when provided (BONUS_AND_TOTAL_COMP). */
@@ -304,36 +365,50 @@ function isBonusTarget(t: string): boolean {
   return t === "income.user.bonus" || t === "income.partner.bonus" || t === "income.user.bonus.growthPct" || t === "income.partner.bonus.growthPct";
 }
 
-/** Gate and normalize proposed overrides + totalCompTarget by deterministic income intent. */
+/** Gate and normalize proposed overrides + totalCompTarget + totalCompConstraint by deterministic income intent. */
 function applyIntentGate(
   intent: IncomeIntent,
   overrides: TargetedOverride[],
   totalCompTarget: { fromAge: number; value: number; who: "user" | "partner" } | null,
-): { overrides: TargetedOverride[]; totalCompTarget: { fromAge: number; value: number; who: "user" | "partner" } | null; forceClarify: boolean; clarifyReason?: string } {
+  totalCompConstraint: TotalCompConstraint | null,
+): {
+  overrides: TargetedOverride[];
+  totalCompTarget: { fromAge: number; value: number; who: "user" | "partner" } | null;
+  totalCompConstraint: TotalCompConstraint | null;
+  forceClarify: boolean;
+  clarifyReason?: string;
+} {
   if (intent === "AMBIGUOUS_CONFLICT") {
-    return { overrides: [], totalCompTarget: null, forceClarify: true, clarifyReason: "Your request sounds like a cap or limit without a clear field (base vs bonus vs total comp). Can you specify what to change?" };
+    return {
+      overrides: [],
+      totalCompTarget: null,
+      totalCompConstraint: null,
+      forceClarify: true,
+      clarifyReason:
+        "Your request sounds like a cap or limit without a clear field (base vs bonus vs total comp). Can you specify what to change?",
+    };
   }
 
   if (intent === "BONUS_ONLY") {
     const allowed = overrides.filter((o) => isBonusTarget(o.target) || (!isBaseTarget(o.target) && !isBonusTarget(o.target)));
-    return { overrides: allowed, totalCompTarget: null, forceClarify: false };
+    return { overrides: allowed, totalCompTarget: null, totalCompConstraint: null, forceClarify: false };
   }
 
   if (intent === "TOTAL_COMP_ONLY") {
     const allowed = overrides.filter((o) => !isBonusTarget(o.target));
-    return { overrides: allowed, totalCompTarget, forceClarify: false };
+    return { overrides: allowed, totalCompTarget, totalCompConstraint, forceClarify: false };
   }
 
   if (intent === "BASE_ONLY") {
     const allowed = overrides.filter((o) => !isBonusTarget(o.target));
-    return { overrides: allowed, totalCompTarget: null, forceClarify: false };
+    return { overrides: allowed, totalCompTarget: null, totalCompConstraint: null, forceClarify: false };
   }
 
   if (intent === "BONUS_AND_TOTAL_COMP") {
-    return { overrides, totalCompTarget, forceClarify: false };
+    return { overrides, totalCompTarget, totalCompConstraint, forceClarify: false };
   }
 
-  return { overrides, totalCompTarget, forceClarify: false };
+  return { overrides, totalCompTarget, totalCompConstraint, forceClarify: false };
 }
 
 export async function POST(req: Request) {
@@ -376,7 +451,7 @@ export async function POST(req: Request) {
   const system = [
     "You are Planlife AI, a conversational scenario planner.",
     "context.currentValues reflects the current scenario after applying all enabled cards. Propose only the additional changes needed from the current scenario; do not restate existing enabled overrides.",
-    "Income semantics: When user asks for total comp (e.g. 'income to 800k', 'make 800k', 'total comp 800k') at a given age, output totalCompTarget: { fromAge, value: targetTotalComp, who: 'user' } (or 'partner' if they said partner). Do NOT output an income.user.base override for that — the server will compute base from bonus at that same age. Only output income.user.base or income.user.bonus overrides when user explicitly says 'base salary'/'salary'/'base' or 'bonus'. For totalCompTarget, add an assumption like: 'Bonus follows your current bonus path (incl growth); base will be set so total comp reaches $X.' If user says 'bonus stays flat' use an explicit bonus override instead.",
+    "Income semantics: When user asks for total comp (e.g. 'income to 800k', 'make 800k', 'total comp 800k') at a single age, output totalCompTarget: { fromAge, value, who }. Do NOT output income.user.base for that — the server computes base from bonus. For multi-year targets (e.g. '$1M in 4 years, $2M in 10 years') or a cap (e.g. 'cap at $2.5M'), output totalCompConstraint: { person, milestones: [{ age, value }, ...], cap?: { value, startAge }, resolutionPolicy: 'BASE_ONLY' | 'BONUS_ONLY' | 'PROPORTIONAL' | 'ASK' }. If the user does not specify how to hit the targets, use resolutionPolicy: 'ASK' so the server can ask. Only output income.user.base or income.user.bonus overrides when user explicitly says 'base'/'salary' or 'bonus'. Caps are enforced as hard ceilings (no growth above cap).",
     "When user says 'back to normal' or 'go back to normal' after a temporary range: add a second override at rejoin age (first year after the range) setting income.user.base to context.series.baselineUserBaseByYear[rejoinYearIndex] so total comp rejoins the baseline path. Add assumption: 'Back to normal means rejoining your baseline total compensation at age X.'",
     "Classify the user message into either mode='clarify' (ask questions, no overrides) or mode='propose' (assumptions + overrides).",
     "Return JSON only and conform to the provided JSON Schema.",
@@ -499,7 +574,25 @@ export async function POST(req: Request) {
   const errors: string[] = [];
   const overrides: TargetedOverride[] = [];
 
-  if (proposedOverridesRaw.length === 0 && !shape.totalCompTarget) {
+  const hasConstraint =
+    shape.totalCompConstraint &&
+    shape.totalCompConstraint.milestones.length > 0;
+  const constraintNeedsPolicy =
+    hasConstraint &&
+    (!shape.totalCompConstraint!.resolutionPolicy || shape.totalCompConstraint!.resolutionPolicy === "ASK");
+
+  if (constraintNeedsPolicy) {
+    const out: AiPlannerResponse = {
+      mode: "clarify",
+      questions: [
+        "To hit these total comp targets, should I adjust base only, bonus only, or both proportionally?",
+      ],
+      assumptions: shape.assumptions ?? [],
+    };
+    return Response.json(out);
+  }
+
+  if (proposedOverridesRaw.length === 0 && !shape.totalCompTarget && !hasConstraint) {
     const out: AiPlannerResponse = {
       mode: "clarify",
       questions: ["What change do you want to make (who, amount, and when)? I didn’t receive any actionable overrides."],
@@ -516,7 +609,7 @@ export async function POST(req: Request) {
 
   // Intent gating: restrict income actions so bonus-only never changes base, etc.
   const intent = deriveIncomeIntent(lastUserText);
-  const gated = applyIntentGate(intent, overrides, shape.totalCompTarget);
+  const gated = applyIntentGate(intent, overrides, shape.totalCompTarget, shape.totalCompConstraint);
   if (gated.forceClarify) {
     const out: AiPlannerResponse = {
       mode: "clarify",
@@ -528,6 +621,27 @@ export async function POST(req: Request) {
   overrides.length = 0;
   overrides.push(...gated.overrides);
   const effectiveTotalCompTarget = gated.totalCompTarget;
+  const effectiveConstraint = gated.totalCompConstraint;
+  const hasGatedConstraint =
+    effectiveConstraint != null && effectiveConstraint.milestones.length > 0;
+
+  // Materialize TOTAL_COMP_CONSTRAINT (multi-year / cap) when resolutionPolicy is set
+  const assumptionsFromShape = [...(shape.assumptions ?? [])];
+  let constraintAppliedForPerson: "user" | "partner" | null = null;
+  if (hasGatedConstraint && effectiveConstraint!.resolutionPolicy && effectiveConstraint!.resolutionPolicy !== "ASK") {
+    const result = materializeTotalCompConstraint(body.context, effectiveConstraint!);
+    if (result.error && result.overrides.length === 0) {
+      const out: AiPlannerResponse = {
+        mode: "clarify",
+        questions: [result.error],
+        assumptions: assumptionsFromShape,
+      };
+      return Response.json(out);
+    }
+    overrides.push(...result.overrides);
+    assumptionsFromShape.push(...result.assumptions);
+    constraintAppliedForPerson = effectiveConstraint!.person;
+  }
 
   if (overrides.length === 0 && !effectiveTotalCompTarget) {
     const out: AiPlannerResponse = {
@@ -538,9 +652,8 @@ export async function POST(req: Request) {
     return Response.json(out);
   }
 
-  // Apply totalCompTarget deterministically only when intent allows (TOTAL_COMP_ONLY or BONUS_AND_TOTAL_COMP)
-  const assumptionsFromShape = [...(shape.assumptions ?? [])];
-  if (effectiveTotalCompTarget) {
+  // Apply single-point totalCompTarget only when intent allows and not already handled by constraint
+  if (effectiveTotalCompTarget && effectiveTotalCompTarget.who !== constraintAppliedForPerson) {
     const { fromAge, value: targetTotalComp, who } = effectiveTotalCompTarget;
     if (who === "partner" && !body.context.currentValues.hasPartner) {
       assumptionsFromShape.push("Partner total comp ignored (no partner in plan).");

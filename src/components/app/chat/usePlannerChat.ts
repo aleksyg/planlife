@@ -126,6 +126,7 @@ export function usePlannerChat(args: {
     setError(null);
 
     try {
+      // Planner context = scenario only (saved cards). Never include draft; prevents compounding.
       const context = buildAiPromptPayload(
         baselinePlan,
         baselineRows as YearRow[],
