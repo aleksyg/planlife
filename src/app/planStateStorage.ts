@@ -27,9 +27,11 @@ export function buildPlanStateFromForm(form: BaselineFormState): PlanState {
   const pctToRate = (pct: number | undefined, fallbackRate: number) =>
     typeof pct === "number" && Number.isFinite(pct) ? pct / 100 : fallbackRate;
 
+  const userBonus = form.userBonusAnnual ?? 0;
   const userIncome = {
     baseAnnual: form.userBaseAnnual ?? 0,
-    hasBonus: false,
+    hasBonus: userBonus > 0,
+    bonusAnnual: userBonus > 0 ? userBonus : undefined,
     incomeGrowthRate: pctToRate(form.incomeGrowthRate, 0.03),
     preTaxDeductionsMonthly: form.userPreTaxDeductionsMonthly ?? 0,
     retirement: {
@@ -42,9 +44,11 @@ export function buildPlanStateFromForm(form: BaselineFormState): PlanState {
     },
   };
 
+  const partnerBonus = form.partnerBonusAnnual ?? 0;
   const partnerIncome = {
     baseAnnual: form.partnerBaseAnnual ?? 0,
-    hasBonus: false,
+    hasBonus: partnerBonus > 0,
+    bonusAnnual: partnerBonus > 0 ? partnerBonus : undefined,
     incomeGrowthRate: pctToRate(form.incomeGrowthRate, 0.03),
     preTaxDeductionsMonthly: form.partnerPreTaxDeductionsMonthly ?? 0,
     retirement: {
@@ -127,6 +131,7 @@ export type BaselineFormState = {
   startAge?: number;
   endAge?: number;
   userBaseAnnual?: number;
+  userBonusAnnual?: number;
   incomeGrowthRate?: number;
   userHasRetirement?: boolean;
   userRetirementPreTaxPct?: number;
@@ -137,6 +142,7 @@ export type BaselineFormState = {
   userPreTaxDeductionsMonthly?: number;
   hasPartner?: boolean;
   partnerBaseAnnual?: number;
+  partnerBonusAnnual?: number;
   partnerHasRetirement?: boolean;
   partnerRetirementPreTaxPct?: number;
   partnerRetirementRothPct?: number;
@@ -319,10 +325,14 @@ export function loadBaselineFromStorage(): PlanState | null {
     }
 
     ensureNumber(userIncome, "preTaxDeductionsMonthly", 0);
+    ensureBoolean(userIncome, "hasBonus", false);
+    ensureNumber(userIncome, "bonusAnnual", 0);
     if (hasPartner) {
       const partner = ensureRecord(household, "partner");
       const partnerIncome = ensureRecord(partner, "income");
       ensureNumber(partnerIncome, "preTaxDeductionsMonthly", 0);
+      ensureBoolean(partnerIncome, "hasBonus", false);
+      ensureNumber(partnerIncome, "bonusAnnual", 0);
     }
 
     return parsed as PlanState;
@@ -348,6 +358,7 @@ export function getDefaultFormState(): BaselineFormState {
     startAge: 30,
     endAge: 65,
     userBaseAnnual: 100_000,
+    userBonusAnnual: 0,
     // Rates in the form are entered as percentages (e.g. 3 = 3%).
     incomeGrowthRate: 3,
     userHasRetirement: true,
@@ -359,6 +370,7 @@ export function getDefaultFormState(): BaselineFormState {
     userPreTaxDeductionsMonthly: 0,
     hasPartner: false,
     partnerBaseAnnual: 0,
+    partnerBonusAnnual: 0,
     partnerHasRetirement: false,
     partnerRetirementPreTaxPct: 0,
     partnerRetirementRothPct: 0,

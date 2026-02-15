@@ -69,7 +69,18 @@ function mkCtx(maxYearIndex: number): AiPromptPayload {
       },
       whyNotes: [],
     },
-    series: { grossIncomeByYear: [350_000], brokerageByYear: [500_000], netWorthByYear: [800_000] },
+    enabledOverrides: [],
+    series: {
+      grossIncomeByYear: [350_000],
+      brokerageByYear: [500_000],
+      netWorthByYear: [800_000],
+      userBaseByYear: [200_000],
+      userBonusByYear: [0],
+      partnerBaseByYear: [150_000],
+      partnerBonusByYear: [0],
+      baselineUserBaseByYear: [200_000],
+      baselineUserBonusByYear: [0],
+    },
   };
 }
 

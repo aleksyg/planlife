@@ -28,12 +28,12 @@ export function ChatComposer(props: {
   }, [disabled]);
 
   return (
-    <div className="border-t border-border bg-white/80 backdrop-blur">
+    <div className="border-t border-border bg-card/80 backdrop-blur">
       <div className="mx-auto flex max-w-3xl items-end gap-2 px-4 py-3 sm:px-6">
         <textarea
           ref={textareaRef}
           className={cn(
-            "min-h-[44px] max-h-40 w-full resize-none rounded-2xl border border-input bg-white px-4 py-3 text-sm shadow-sm",
+            "min-h-[44px] max-h-40 w-full resize-none rounded-2xl border border-input bg-background px-4 py-3 text-sm shadow-sm",
             "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
           )}
           placeholder={placeholder ?? 'Describe a scenario…'}

@@ -1,5 +1,6 @@
 import type { PlanState } from "@/engine";
 import type { YearRow } from "@/engine";
+import type { TargetedOverride } from "@/ai/types";
 
 export type AiAllowedMutations = {
   // Bounds/constraints for validation
@@ -68,6 +69,7 @@ export type AiPromptPayload = {
   allowedMutations: AiAllowedMutations;
   currentValues: AiCurrentValues;
   baselineSummary: AiBaselineSummary;
+  enabledOverrides: readonly TargetedOverride[];
   series: {
     /** Baseline household gross income by yearIndex (zero-based). */
     grossIncomeByYear: number[];
@@ -75,6 +77,18 @@ export type AiPromptPayload = {
     brokerageByYear: number[];
     /** Baseline net worth by yearIndex. */
     netWorthByYear: number[];
+    /** Current-scenario user base by yearIndex (for total-comp translation). */
+    userBaseByYear: number[];
+    /** Current-scenario user bonus by yearIndex (for total-comp translation). */
+    userBonusByYear: number[];
+    /** Current-scenario partner base by yearIndex. */
+    partnerBaseByYear: number[];
+    /** Current-scenario partner bonus by yearIndex. */
+    partnerBonusByYear: number[];
+    /** Baseline user base by yearIndex (for rejoin semantics). */
+    baselineUserBaseByYear: number[];
+    /** Baseline user bonus by yearIndex (for rejoin semantics). */
+    baselineUserBonusByYear: number[];
   };
 };
 
@@ -88,17 +102,24 @@ function getHousingMonthlyRent(plan: PlanState): number {
   return plan.household.housing.monthlyPaymentPITI;
 }
 
-export function buildAiPromptPayload(plan: PlanState, baselineRows: YearRow[]): AiPromptPayload {
+export function buildAiPromptPayload(
+  plan: PlanState,
+  baselineRows: YearRow[],
+  scenarioRows: YearRow[] | null | undefined,
+  enabledOverrides: readonly TargetedOverride[] | null | undefined,
+): AiPromptPayload {
   const years = Math.max(1, plan.endAge - plan.startAge + 1);
   const last = baselineRows[baselineRows.length - 1];
   const y0 = baselineRows[0];
+  const currRows = scenarioRows && scenarioRows.length > 0 ? scenarioRows : baselineRows;
+  const curr0 = currRows[0];
 
   const currentValues: AiCurrentValues = {
     hasPartner: plan.household.hasPartner,
     startAge: plan.startAge,
     endAge: plan.endAge,
     user: {
-      baseAnnual: plan.household.user.income.baseAnnual,
+      baseAnnual: curr0?.userGrossIncome ?? plan.household.user.income.baseAnnual,
       incomeGrowthRate: plan.household.user.income.incomeGrowthRate,
       preTaxDeductionsMonthly: plan.household.user.income.preTaxDeductionsMonthly ?? 0,
       retirement: {
@@ -112,7 +133,7 @@ export function buildAiPromptPayload(plan: PlanState, baselineRows: YearRow[]): 
     },
     partner: plan.household.hasPartner && plan.household.partner
       ? {
-          baseAnnual: plan.household.partner.income.baseAnnual,
+          baseAnnual: curr0?.partnerGrossIncome ?? plan.household.partner.income.baseAnnual,
           incomeGrowthRate: plan.household.partner.income.incomeGrowthRate,
           preTaxDeductionsMonthly: plan.household.partner.income.preTaxDeductionsMonthly ?? 0,
           retirement: {
@@ -125,8 +146,8 @@ export function buildAiPromptPayload(plan: PlanState, baselineRows: YearRow[]): 
           },
         }
       : undefined,
-    lifestyleMonthly: getLifestyleMonthly(plan),
-    housingMonthlyRent: getHousingMonthlyRent(plan),
+    lifestyleMonthly: curr0?.lifestyleMonthly ?? getLifestyleMonthly(plan),
+    housingMonthlyRent: curr0?.housingMonthly ?? getHousingMonthlyRent(plan),
     stateTaxRate: plan.assumptions.stateTaxRate ?? 0,
   };
 
@@ -162,10 +183,17 @@ export function buildAiPromptPayload(plan: PlanState, baselineRows: YearRow[]): 
     allowedMutations,
     currentValues,
     baselineSummary,
+    enabledOverrides: enabledOverrides ?? [],
     series: {
       grossIncomeByYear: baselineRows.map((r) => r.grossIncome),
       brokerageByYear: baselineRows.map((r) => r.endBrokerageValue),
       netWorthByYear: baselineRows.map((r) => r.endNetWorth),
+      userBaseByYear: currRows.map((r) => r.userBaseIncome ?? 0),
+      userBonusByYear: currRows.map((r) => r.userBonusIncome ?? 0),
+      partnerBaseByYear: currRows.map((r) => r.partnerBaseIncome ?? 0),
+      partnerBonusByYear: currRows.map((r) => r.partnerBonusIncome ?? 0),
+      baselineUserBaseByYear: baselineRows.map((r) => r.userBaseIncome ?? 0),
+      baselineUserBonusByYear: baselineRows.map((r) => r.userBonusIncome ?? 0),
     },
   };
 }

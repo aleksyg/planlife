@@ -1,5 +1,8 @@
+"use client";
+
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
+import { ThemeToggle } from "@/components/app/ThemeToggle";
 
 export function MarketingNav() {
   return (
@@ -24,9 +27,12 @@ export function MarketingNav() {
           </Link>
         </div>
 
-        <Button asChild className="rounded-full px-5">
-          <Link href="/baseline">Get Started</Link>
-        </Button>
+        <div className="flex items-center gap-2">
+          <ThemeToggle />
+          <Button asChild className="rounded-full px-5">
+            <Link href="/baseline">Get Started</Link>
+          </Button>
+        </div>
       </div>
     </div>
   );

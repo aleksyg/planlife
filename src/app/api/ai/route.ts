@@ -3,6 +3,7 @@ import type { AiChatMessage, AiPlannerResponse, TargetedOverride } from "@/ai/ty
 import type { AiPromptPayload } from "@/ai/promptPayload";
 import { getLastUserText, promptMentionsPartner } from "@/ai/compiler/promptFacts";
 import { computeConfirmationsRequiredFromOverrides, isPartnerOverrideTarget } from "@/ai/compiler/confirmations";
+import { deriveIncomeIntent, type IncomeIntent } from "@/ai/compiler/incomeIntent";
 
 type RequestBody = {
   messages: AiChatMessage[];
@@ -76,13 +77,23 @@ function getJsonSchema() {
                   "spend.housing",
                 ],
               },
-              kind: { enum: ["set", "add", "mult"] },
+              kind: { enum: ["set", "add", "mult", "cap"] },
               fromAge: { type: "number" },
               toAge: { type: ["number", "null"] },
               value: { type: "number" },
             },
             required: ["target", "kind", "fromAge", "toAge", "value"],
           },
+        },
+        totalCompTarget: {
+          type: ["object", "null"],
+          additionalProperties: false,
+          properties: {
+            fromAge: { type: "number" },
+            value: { type: "number" },
+            who: { enum: ["user", "partner"] },
+          },
+          required: ["fromAge", "value", "who"],
         },
       },
       required: [
@@ -92,6 +103,7 @@ function getJsonSchema() {
         "draftScenarioSummary",
         "impactPreviewRequest",
         "overrides",
+        "totalCompTarget",
       ],
     },
   } as const;
@@ -107,6 +119,29 @@ function validateAndNormalizeOverride(
   const b = ctx.allowedMutations;
   const inRange = (v: number, min: number, max: number) => v >= min && v <= max;
   const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+
+  const yearsSpan = endAge - startAge; // e.g. 52-30 = 22
+  const asIntIfClose = (x: number) => {
+    const r = Math.round(x);
+    return Math.abs(x - r) < 1e-6 ? r : null;
+  };
+
+  // Accept either:
+  // - absolute age (e.g. 30..52), OR
+  // - yearIndex offset (e.g. 0..yearsSpan) meaning startAge + offset
+  const normalizeAge = (raw: number): number | null => {
+    // If it looks like a yearIndex offset, convert to absolute age.
+    if (raw < startAge && raw >= 0 && raw <= yearsSpan) {
+      const rawInt = asIntIfClose(raw);
+      if (rawInt == null) return null;
+      return startAge + rawInt;
+    }
+
+    // Otherwise treat as absolute age (must be integer).
+    const ageInt = asIntIfClose(raw);
+    if (ageInt == null) return null;
+    return ageInt;
+  };
 
   if (!isRecord(obj) || typeof obj["target"] !== "string" || typeof obj["kind"] !== "string") {
     return { override: null, error: "Invalid override: expected object with target and kind." };
@@ -128,17 +163,25 @@ function validateAndNormalizeOverride(
   }
 
   const kind = obj["kind"] as string;
-  if (kind !== "set" && kind !== "add" && kind !== "mult") {
-    return { override: null, error: "kind must be set, add, or mult." };
+  if (kind !== "set" && kind !== "add" && kind !== "mult" && kind !== "cap") {
+    return { override: null, error: "kind must be set, add, mult, or cap." };
   }
 
   const isGrowthPct = target.endsWith(".growthPct");
   if (isGrowthPct && kind !== "set") {
     return { override: null, error: "Growth targets only support kind 'set'." };
   }
+  if (kind === "cap" && target.endsWith(".growthPct")) {
+    return { override: null, error: "Cap is not supported for growth targets." };
+  }
 
-  const fromAge = obj["fromAge"];
-  if (!isNum(fromAge)) return { override: null, error: "fromAge must be a number." };
+  const fromAgeRaw = obj["fromAge"];
+  if (!isNum(fromAgeRaw)) return { override: null, error: "fromAge must be a number." };
+
+  const fromAge = normalizeAge(fromAgeRaw);
+  if (fromAge == null) {
+    return { override: null, error: "fromAge must be an integer age (or an integer yearIndex like 0 for now)." };
+  }
   if (!inRange(fromAge, startAge, endAge)) {
     return { override: null, error: `fromAge must be between ${startAge} and ${endAge}.` };
   }
@@ -147,11 +190,16 @@ function validateAndNormalizeOverride(
   let toAge: number | undefined;
   if (toAgeRaw !== null && toAgeRaw !== undefined) {
     if (!isNum(toAgeRaw)) return { override: null, error: "toAge must be a number or null." };
-    if (!inRange(toAgeRaw, startAge, endAge)) {
+
+    const toAgeNorm = normalizeAge(toAgeRaw);
+    if (toAgeNorm == null) {
+      return { override: null, error: "toAge must be an integer age (or an integer yearIndex like 1 for next year)." };
+    }
+    if (!inRange(toAgeNorm, startAge, endAge)) {
       return { override: null, error: `toAge must be between ${startAge} and ${endAge}.` };
     }
-    if (toAgeRaw < fromAge) return { override: null, error: "toAge must be >= fromAge." };
-    toAge = toAgeRaw;
+    if (toAgeNorm < fromAge) return { override: null, error: "toAge must be >= fromAge." };
+    toAge = toAgeNorm;
   }
 
   const value = obj["value"];
@@ -168,6 +216,9 @@ function validateAndNormalizeOverride(
   }
 
   const isSpend = target === "spend.lifestyle" || target === "spend.housing";
+  if (kind === "cap" && isSpend) {
+    return { override: null, error: "Cap is only supported for income targets." };
+  }
   if (isSpend) {
     if (!inRange(value, b.monthlyDollars.min, b.monthlyDollars.max)) {
       return { override: null, error: `Monthly value out of range (${b.monthlyDollars.min}..${b.monthlyDollars.max}).` };
@@ -180,9 +231,10 @@ function validateAndNormalizeOverride(
   if (kind === "set" && isSpend && value < 0) return { override: null, error: "Set value for spend must be >= 0." };
   if (kind === "set" && !isSpend && value < 0) return { override: null, error: "Set value for income must be >= 0." };
   if (kind === "mult" && value <= 0) return { override: null, error: "Mult value must be > 0." };
+  if (kind === "cap" && value < 0) return { override: null, error: "Cap value must be >= 0." };
 
   return {
-    override: { target: target as TargetedOverride["target"], kind: kind as "set" | "add" | "mult", fromAge, toAge, value },
+    override: { target: target as TargetedOverride["target"], kind: kind as "set" | "add" | "mult" | "cap", fromAge, toAge, value },
     error: null,
   };
 }
@@ -194,6 +246,7 @@ function validatePlannerShape(obj: unknown): {
   draftScenarioSummary: string | null;
   impactPreviewRequest: { focusYearIndex: number | null } | null;
   overrides: unknown[] | null;
+  totalCompTarget: { fromAge: number; value: number; who: "user" | "partner" } | null;
 } | null {
   if (!isRecord(obj)) return null;
   const mode = obj["mode"];
@@ -206,10 +259,82 @@ function validatePlannerShape(obj: unknown): {
     ? { focusYearIndex: typeof impact["focusYearIndex"] === "number" ? (impact["focusYearIndex"] as number) : null }
     : null;
   const overrides = Array.isArray(obj["overrides"]) ? (obj["overrides"] as unknown[]) : null;
-  return { mode, questions, assumptions, draftScenarioSummary, impactPreviewRequest, overrides };
+  let totalCompTarget: { fromAge: number; value: number; who: "user" | "partner" } | null = null;
+  const tct = obj["totalCompTarget"];
+  if (isRecord(tct) && typeof tct["fromAge"] === "number" && typeof tct["value"] === "number" && (tct["who"] === "user" || tct["who"] === "partner")) {
+    totalCompTarget = { fromAge: tct["fromAge"], value: tct["value"], who: tct["who"] };
+  }
+  return { mode, questions, assumptions, draftScenarioSummary, impactPreviewRequest, overrides, totalCompTarget };
 }
 
-// ...everything above unchanged...
+/** Deterministic: base so that base + bonusAtFromAge = targetTotalComp. Uses bonus at same age from context, or specifiedBonus when provided (BONUS_AND_TOTAL_COMP). */
+function baseForTargetTotalComp(
+  ctx: AiPromptPayload,
+  fromAge: number,
+  targetTotalComp: number,
+  who: "user" | "partner",
+  specifiedBonus?: number,
+): { base: number; assumption: string } {
+  const startAge = ctx.currentValues.startAge;
+  const yearIndex = fromAge - startAge;
+  const bonusByYear = who === "user" ? ctx.series.userBonusByYear : ctx.series.partnerBonusByYear;
+  const projectedBonus = yearIndex >= 0 && yearIndex < bonusByYear.length ? bonusByYear[yearIndex]! : 0;
+  const bonusAtFromAge = specifiedBonus !== undefined ? specifiedBonus : projectedBonus;
+  const base = Math.max(0, targetTotalComp - bonusAtFromAge);
+  const fmt = (n: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(n);
+  if (targetTotalComp < bonusAtFromAge) {
+    return {
+      base: 0,
+      assumption: `Target total comp ${fmt(targetTotalComp)} is below your projected bonus at that age (${fmt(bonusAtFromAge)}); base set to $0.`,
+    };
+  }
+  if (specifiedBonus !== undefined) {
+    return { base, assumption: `Using your specified bonus ${fmt(specifiedBonus)} at age ${fromAge}; base set to ~${fmt(base)} so total comp is ${fmt(targetTotalComp)}.` };
+  }
+  return {
+    base,
+    assumption: `Bonus follows your current bonus path (incl growth), ~${fmt(bonusAtFromAge)} at age ${fromAge}; base set to ~${fmt(base)} so total comp is ${fmt(targetTotalComp)}.`,
+  };
+}
+
+function isBaseTarget(t: string): boolean {
+  return t === "income.user.base" || t === "income.partner.base" || t === "income.user.base.growthPct" || t === "income.partner.base.growthPct";
+}
+function isBonusTarget(t: string): boolean {
+  return t === "income.user.bonus" || t === "income.partner.bonus" || t === "income.user.bonus.growthPct" || t === "income.partner.bonus.growthPct";
+}
+
+/** Gate and normalize proposed overrides + totalCompTarget by deterministic income intent. */
+function applyIntentGate(
+  intent: IncomeIntent,
+  overrides: TargetedOverride[],
+  totalCompTarget: { fromAge: number; value: number; who: "user" | "partner" } | null,
+): { overrides: TargetedOverride[]; totalCompTarget: { fromAge: number; value: number; who: "user" | "partner" } | null; forceClarify: boolean; clarifyReason?: string } {
+  if (intent === "AMBIGUOUS_CONFLICT") {
+    return { overrides: [], totalCompTarget: null, forceClarify: true, clarifyReason: "Your request sounds like a cap or limit without a clear field (base vs bonus vs total comp). Can you specify what to change?" };
+  }
+
+  if (intent === "BONUS_ONLY") {
+    const allowed = overrides.filter((o) => isBonusTarget(o.target) || (!isBaseTarget(o.target) && !isBonusTarget(o.target)));
+    return { overrides: allowed, totalCompTarget: null, forceClarify: false };
+  }
+
+  if (intent === "TOTAL_COMP_ONLY") {
+    const allowed = overrides.filter((o) => !isBonusTarget(o.target));
+    return { overrides: allowed, totalCompTarget, forceClarify: false };
+  }
+
+  if (intent === "BASE_ONLY") {
+    const allowed = overrides.filter((o) => !isBonusTarget(o.target));
+    return { overrides: allowed, totalCompTarget: null, forceClarify: false };
+  }
+
+  if (intent === "BONUS_AND_TOTAL_COMP") {
+    return { overrides, totalCompTarget, forceClarify: false };
+  }
+
+  return { overrides, totalCompTarget, forceClarify: false };
+}
 
 export async function POST(req: Request) {
   console.log("[/api/ai] HIT");
@@ -250,15 +375,18 @@ export async function POST(req: Request) {
 
   const system = [
     "You are Planlife AI, a conversational scenario planner.",
+    "context.currentValues reflects the current scenario after applying all enabled cards. Propose only the additional changes needed from the current scenario; do not restate existing enabled overrides.",
+    "Income semantics: When user asks for total comp (e.g. 'income to 800k', 'make 800k', 'total comp 800k') at a given age, output totalCompTarget: { fromAge, value: targetTotalComp, who: 'user' } (or 'partner' if they said partner). Do NOT output an income.user.base override for that — the server will compute base from bonus at that same age. Only output income.user.base or income.user.bonus overrides when user explicitly says 'base salary'/'salary'/'base' or 'bonus'. For totalCompTarget, add an assumption like: 'Bonus follows your current bonus path (incl growth); base will be set so total comp reaches $X.' If user says 'bonus stays flat' use an explicit bonus override instead.",
+    "When user says 'back to normal' or 'go back to normal' after a temporary range: add a second override at rejoin age (first year after the range) setting income.user.base to context.series.baselineUserBaseByYear[rejoinYearIndex] so total comp rejoins the baseline path. Add assumption: 'Back to normal means rejoining your baseline total compensation at age X.'",
     "Classify the user message into either mode='clarify' (ask questions, no overrides) or mode='propose' (assumptions + overrides).",
     "Return JSON only and conform to the provided JSON Schema.",
-    "Propose overrides with: target (e.g. income.user.base, spend.lifestyle), kind (set|add|mult), fromAge (plan age), toAge (number or null), value.",
+    "Propose overrides with: target (e.g. income.user.base, income.user.bonus, spend.lifestyle), kind (set|add|mult|cap), fromAge (plan age), toAge (number or null), value.",
     "Use fromAge (plan age), not yearIndex. age = context.currentValues.startAge + yearIndex.",
     "Open-ended (e.g. permanent raise): set toAge to null. Ranged override: set toAge to the last age in the range.",
     "For growth rate changes use target income.user.base.growthPct (or income.user.bonus.growthPct, income.partner.base.growthPct, income.partner.bonus.growthPct) with value as decimal (e.g. 0.04 for 4%). Only kind 'set' for growth targets.",
     "Never invent projection numbers; all impacts are computed by the engine.",
     "Hard rule: never propose partner overrides unless the user explicitly references partner/wife/husband/spouse.",
-    "For a permanent salary change at a given age: target income.user.base, kind set, fromAge = that age, toAge null, value = new salary. Income will then compound from that anchor.",
+    "For a permanent base salary change at a given age: target income.user.base, kind set, fromAge = that age, toAge null, value = new base. Income will then compound from that anchor.",
     "For time off / sabbatical: set income.user.base to 0 at fromAge, toAge = last year off; then set income.user.base to return salary at fromAge = first year back, toAge null.",
     "If ambiguous, choose mode='clarify' with 1–5 targeted questions and explicit assumptions.",
   ].join("\n");
@@ -371,7 +499,7 @@ export async function POST(req: Request) {
   const errors: string[] = [];
   const overrides: TargetedOverride[] = [];
 
-  if (proposedOverridesRaw.length === 0) {
+  if (proposedOverridesRaw.length === 0 && !shape.totalCompTarget) {
     const out: AiPlannerResponse = {
       mode: "clarify",
       questions: ["What change do you want to make (who, amount, and when)? I didn’t receive any actionable overrides."],
@@ -384,6 +512,54 @@ export async function POST(req: Request) {
     const { override, error } = validateAndNormalizeOverride(o, body.context);
     if (error) errors.push(error);
     else if (override) overrides.push(override);
+  }
+
+  // Intent gating: restrict income actions so bonus-only never changes base, etc.
+  const intent = deriveIncomeIntent(lastUserText);
+  const gated = applyIntentGate(intent, overrides, shape.totalCompTarget);
+  if (gated.forceClarify) {
+    const out: AiPlannerResponse = {
+      mode: "clarify",
+      questions: [gated.clarifyReason ?? "Can you clarify what you’d like to change (base, bonus, or total comp)?"],
+      assumptions: shape.assumptions ?? [],
+    };
+    return Response.json(out);
+  }
+  overrides.length = 0;
+  overrides.push(...gated.overrides);
+  const effectiveTotalCompTarget = gated.totalCompTarget;
+
+  if (overrides.length === 0 && !effectiveTotalCompTarget) {
+    const out: AiPlannerResponse = {
+      mode: "clarify",
+      questions: ["That would only change base or total comp; you asked for bonus-only (or the opposite). Should I only change bonus, or did you mean total comp?"],
+      assumptions: shape.assumptions ?? [],
+    };
+    return Response.json(out);
+  }
+
+  // Apply totalCompTarget deterministically only when intent allows (TOTAL_COMP_ONLY or BONUS_AND_TOTAL_COMP)
+  const assumptionsFromShape = [...(shape.assumptions ?? [])];
+  if (effectiveTotalCompTarget) {
+    const { fromAge, value: targetTotalComp, who } = effectiveTotalCompTarget;
+    if (who === "partner" && !body.context.currentValues.hasPartner) {
+      assumptionsFromShape.push("Partner total comp ignored (no partner in plan).");
+    } else {
+      const bonusTarget = who === "user" ? "income.user.bonus" : "income.partner.bonus";
+      const specifiedBonus = intent === "BONUS_AND_TOTAL_COMP"
+        ? overrides.find((o) => o.target === bonusTarget && o.fromAge === fromAge)?.value
+        : undefined;
+      const { base, assumption } = baseForTargetTotalComp(body.context, fromAge, targetTotalComp, who, specifiedBonus);
+      const targetKey = who === "user" ? "income.user.base" : "income.partner.base";
+      overrides.push({
+        target: targetKey as TargetedOverride["target"],
+        kind: "set" as const,
+        fromAge,
+        toAge: undefined,
+        value: base,
+      });
+      assumptionsFromShape.push(assumption);
+    }
   }
 
   const partnerOverrides = overrides.filter(isPartnerOverrideTarget);
@@ -417,7 +593,7 @@ export async function POST(req: Request) {
 
   const out: AiPlannerResponse = {
     mode: "propose",
-    assumptions: shape.assumptions ?? [],
+    assumptions: assumptionsFromShape,
     overrides,
     draftScenarioSummary: shape.draftScenarioSummary ?? undefined,
     impactPreviewRequest,

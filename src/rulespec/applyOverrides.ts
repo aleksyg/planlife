@@ -12,6 +12,7 @@ function isGrowthPctTarget(target: TargetKey): boolean {
   return target.endsWith(".growthPct");
 }
 
+/** Appends op to the end of the target's overrides (existing first, scenario last → later wins). */
 function appendOverride(specs: RuleSpecInputs, target: TargetKey, op: Override): RuleSpecInputs {
   switch (target) {
     case "income.user.base":
@@ -98,6 +99,9 @@ function appendGrowthOverride(specs: RuleSpecInputs, target: TargetKey, go: Grow
 
 /**
  * Apply structured overrides to the rule-spec inputs.
+ * Scenario overrides are always appended to the end (existing first, then scenario).
+ * This ensures "later wins": when baseline and scenario both target the same age,
+ * the scenario card overrides the baseline.
  * This function is text-agnostic and does not interpret user messages.
  */
 export function applyOverridesToRuleSpecInputs(base: RuleSpecInputs, ops: readonly TargetedOverride[]): RuleSpecInputs {
@@ -114,8 +118,10 @@ export function applyOverridesToRuleSpecInputs(base: RuleSpecInputs, ops: readon
       op.kind === "set"
         ? { kind: "set", fromAge: op.fromAge, value: op.value, toAge: op.toAge }
         : op.kind === "add"
-          ? { kind: "add", fromAge: op.fromAge, toAge: op.toAge, value: op.value }
-          : { kind: "mult", fromAge: op.fromAge, toAge: op.toAge, value: op.value };
+          ? { kind: "add", fromAge: op.fromAge, value: op.value, toAge: op.toAge }
+          : op.kind === "mult"
+            ? { kind: "mult", fromAge: op.fromAge, value: op.value, toAge: op.toAge }
+            : { kind: "cap", fromAge: op.fromAge, value: op.value, toAge: op.toAge };
     next = appendOverride(next, op.target, override);
   }
   return next;

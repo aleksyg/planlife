@@ -16,6 +16,8 @@ import { usePlannerChat } from "./usePlannerChat";
 export function ChatPanel(props: {
   baselinePlan: PlanState;
   baselineRows: readonly YearRow[];
+  scenarioRows: readonly YearRow[];
+  enabledOverrides: readonly TargetedOverride[];
   cards: ScenarioCard[];
   draftOverrides: TargetedOverride[] | null;
   onDraftChange: (overrides: TargetedOverride[] | null) => void;
@@ -34,10 +36,14 @@ export function ChatPanel(props: {
     allConfirmationsChecked,
     send,
     toggleConfirm,
+    clearDraft,
+    clearDraftAndResetChat,
     draftOverrides: hookDraftOverrides,
   } = usePlannerChat({
     baselinePlan: props.baselinePlan,
     baselineRows: props.baselineRows,
+    scenarioRows: props.scenarioRows,
+    enabledOverrides: props.enabledOverrides,
     onDraftChange: props.onDraftChange,
     clearDraftRef: props.clearDraftRef,
   });
@@ -48,26 +54,38 @@ export function ChatPanel(props: {
   const proposal = response?.mode === "propose" ? response : null;
   const changes = useMemo(() => explanation?.changes ?? [], [explanation]);
 
-  const handleSaveAsNewChange = () => {
+  const handleSaveAsNewCard = () => {
     if (!proposal || (hookDraftOverrides?.length ?? 0) === 0) return;
+    const overrides = hookDraftOverrides ?? [];
+    if (typeof console !== "undefined" && console.log) {
+      console.log("[ChatPanel] save as new card, overrides:", overrides.length, overrides[0]);
+    }
     props.onSaveDraft(
-      hookDraftOverrides ?? [],
+      overrides,
       proposal.draftScenarioSummary ?? undefined,
       explanation?.changes?.join(". ") ?? undefined,
     );
+    clearDraftAndResetChat();
+    setScrollSignal((s) => s + 1);
+  };
+
+  const handleClearDraft = () => {
+    clearDraft();
+    setComposerValue("");
+    setScrollSignal((s) => s + 1);
   };
 
   return (
     <div
       className={cn(
-        "flex max-h-[640px] flex-col overflow-hidden rounded-2xl border border-border bg-white shadow-sm",
+        "flex max-h-[640px] flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-sm",
         "lg:max-h-[calc(100vh-220px)]",
       )}
     >
-      <div className="shrink-0 border-b border-border bg-white px-5 py-4">
+      <div className="shrink-0 border-b border-border bg-card px-5 py-4">
         <div className="text-sm font-semibold">Planner chat</div>
         <div className="mt-1 text-xs text-muted-foreground">
-          Ask a &quot;what if?&quot; Preview below. Save as new change to add a card.
+          Ask a &quot;what if?&quot; Preview below. Save as new card to add a card.
         </div>
       </div>
 
@@ -86,10 +104,12 @@ export function ChatPanel(props: {
                   confirmationsRequired={confirmationsRequired}
                   confirmChecks={confirmChecks}
                   onToggleConfirm={toggleConfirm}
-                  onSaveAsNewChange={handleSaveAsNewChange}
+                  onSaveAsNewChange={handleSaveAsNewCard}
+                  onClearDraft={handleClearDraft}
                   saveDisabled={
                     !allConfirmationsChecked || (hookDraftOverrides?.length ?? 0) === 0
                   }
+                  hideActions
                 />
               ) : null
             }
@@ -110,7 +130,22 @@ export function ChatPanel(props: {
         ) : null}
       </div>
 
-      <div className="shrink-0 border-t border-border bg-white p-2">
+      {proposal ? (
+        <div className="shrink-0 border-t border-border bg-card px-4 py-3 flex items-center gap-2">
+          <Button
+            className="rounded-2xl"
+            onClick={handleSaveAsNewCard}
+            disabled={!allConfirmationsChecked || (hookDraftOverrides?.length ?? 0) === 0}
+          >
+            Save as new card
+          </Button>
+          <Button variant="ghost" size="sm" className="rounded-2xl" onClick={handleClearDraft}>
+            Clear draft
+          </Button>
+        </div>
+      ) : null}
+
+      <div className="shrink-0 border-t border-border bg-card p-2">
         <ChatComposer
           value={composerValue}
           onChange={setComposerValue}

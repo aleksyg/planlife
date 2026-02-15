@@ -9,7 +9,7 @@ function isTargetedOverride(x: unknown): x is import("@/rulespec/types").Targete
   const o = x as Record<string, unknown>;
   return (
     typeof o.target === "string" &&
-    (o.kind === "set" || o.kind === "add" || o.kind === "mult") &&
+    (o.kind === "set" || o.kind === "add" || o.kind === "mult" || o.kind === "cap") &&
     typeof (o as { fromAge: unknown }).fromAge === "number" &&
     typeof (o as { value: unknown }).value === "number"
   );

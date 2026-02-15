@@ -12,7 +12,10 @@ export function ProposalCard(props: {
   confirmChecks: Record<string, boolean>;
   onToggleConfirm: (key: string, checked: boolean) => void;
   onSaveAsNewChange: () => void;
+  onClearDraft?: () => void;
   saveDisabled?: boolean;
+  /** When true, hide the CTA buttons (they are rendered by the parent). */
+  hideActions?: boolean;
 }) {
   const {
     response,
@@ -21,7 +24,9 @@ export function ProposalCard(props: {
     confirmChecks,
     onToggleConfirm,
     onSaveAsNewChange,
+    onClearDraft,
     saveDisabled,
+    hideActions = false,
   } = props;
 
   const hasAssumptions = (response.assumptions?.length ?? 0) > 0;
@@ -35,63 +40,72 @@ export function ProposalCard(props: {
     response.draftScenarioSummary ?? (changes.length > 0 ? changes[0] : "Review and save as a scenario card.");
 
   return (
-    <div className="w-full rounded-2xl border border-border bg-white p-4 shadow-sm">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <div className="text-sm font-medium">Proposal</div>
-          <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{shortSummary}</p>
-        </div>
-        <Button
-          className="shrink-0 rounded-2xl"
-          onClick={onSaveAsNewChange}
-          disabled={saveDisabled ?? !allConfirmationsChecked}
-        >
-          Save as new change
-        </Button>
-      </div>
+    <div className="w-full rounded-2xl border border-border bg-card p-4 shadow-sm">
+      <p className="text-sm text-muted-foreground line-clamp-2">{shortSummary}</p>
 
-        {confirmationsRequired.length ? (
-          <div className="mt-4 rounded-xl border border-border bg-muted/10 p-3">
-            <div className="text-xs font-medium text-muted-foreground">Confirm before saving</div>
-            <div className="mt-2 space-y-2 text-sm">
-              {confirmationsRequired.map((c) => (
-                <label key={c} className="flex cursor-pointer items-start gap-2">
-                  <input
-                    type="checkbox"
-                    className="mt-1"
-                    checked={Boolean(confirmChecks[c])}
-                    onChange={(e) => onToggleConfirm(c, e.target.checked)}
-                  />
-                  <span className="text-foreground">{c}</span>
-                </label>
-              ))}
-            </div>
+      {confirmationsRequired.length > 0 ? (
+        <div className="mt-3 rounded-xl border border-border bg-muted/10 p-3">
+          <div className="text-xs font-medium text-muted-foreground">Confirm before saving</div>
+          <div className="mt-2 space-y-2 text-sm">
+            {confirmationsRequired.map((c) => (
+              <label key={c} className="flex cursor-pointer items-start gap-2">
+                <input
+                  type="checkbox"
+                  className="mt-1"
+                  checked={Boolean(confirmChecks[c])}
+                  onChange={(e) => onToggleConfirm(c, e.target.checked)}
+                />
+                <span className="text-foreground">{c}</span>
+              </label>
+            ))}
           </div>
-        ) : null}
+        </div>
+      ) : null}
 
-        <div className={cn("mt-4 grid gap-3", !hasAssumptions && !hasChanges ? "hidden" : "")}>
-          {hasAssumptions ? (
-            <details className="rounded-xl border border-border bg-muted/5 px-4 py-3" open={false}>
-              <summary className="cursor-pointer text-sm font-medium">Assumptions</summary>
-              <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-muted-foreground">
-                {(response.assumptions ?? []).map((t, idx) => (
-                  <li key={idx}>{t}</li>
-                ))}
-              </ul>
-            </details>
-          ) : null}
+      {(hasAssumptions || hasChanges) ? (
+        <details className="mt-3 rounded-xl border border-border bg-muted/5 px-4 py-2" open={false}>
+          <summary className="cursor-pointer text-sm font-medium">Details</summary>
+          <div className="mt-2 space-y-2 text-sm text-muted-foreground">
+            {hasAssumptions ? (
+              <div>
+                <div className="font-medium text-foreground">Assumptions</div>
+                <ul className="list-disc space-y-1 pl-5">
+                  {(response.assumptions ?? []).map((t, idx) => (
+                    <li key={idx}>{t}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            {hasChanges ? (
+              <div>
+                <div className="font-medium text-foreground">Changes</div>
+                <ul className="list-disc space-y-1 pl-5">
+                  {changes.map((t, idx) => (
+                    <li key={idx}>{t}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+          </div>
+        </details>
+      ) : null}
 
-          {hasChanges ? (
-            <details className="group rounded-xl border border-border bg-muted/5 px-4 py-3" open={false}>
-              <summary className="cursor-pointer text-sm font-medium">Changes</summary>
-              <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-muted-foreground">
-                {changes.map((t, idx) => (
-                  <li key={idx}>{t}</li>
-                ))}
-              </ul>
-            </details>
+      {!hideActions ? (
+        <div className="mt-3 flex items-center gap-2">
+          <Button
+            className="rounded-2xl"
+            onClick={onSaveAsNewChange}
+            disabled={saveDisabled ?? !allConfirmationsChecked}
+          >
+            Save as new card
+          </Button>
+          {onClearDraft ? (
+            <Button variant="ghost" size="sm" className="rounded-2xl" onClick={onClearDraft}>
+              Clear draft
+            </Button>
           ) : null}
         </div>
+      ) : null}
     </div>
   );
 }

@@ -26,7 +26,7 @@ export function ScenarioCardsList(props: {
             <li
               key={card.id}
               className={cn(
-                "rounded-xl border border-border bg-white p-3 shadow-sm transition-colors",
+                "rounded-xl border border-border bg-card p-3 shadow-sm transition-colors",
                 !card.enabled && "opacity-60",
               )}
             >

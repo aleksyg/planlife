@@ -32,21 +32,27 @@ function assistantTextFromResponse(resp: AiPlannerResponse): string {
     return parts.length ? parts.join("\n\n") : "I need a bit more detail to model that.";
   }
 
-  // propose — keep compact; details are in the proposal card
+  // propose — plain English: summary, assumptions, then changes
+  const lines: string[] = [];
   if (resp.draftScenarioSummary) {
-    return resp.draftScenarioSummary;
+    lines.push(resp.draftScenarioSummary);
   }
-  return "Proposal ready. Review the card below and save as new change when ready.";
+  if (resp.assumptions?.length) {
+    lines.push("Assumptions:\n" + resp.assumptions.map((a) => `• ${a}`).join("\n"));
+  }
+  return lines.length ? lines.join("\n\n") : "Proposal ready. Review below and save as new card when ready.";
 }
 
 export function usePlannerChat(args: {
   baselinePlan: PlanState;
   baselineRows: readonly YearRow[];
+  scenarioRows: readonly YearRow[];
+  enabledOverrides: readonly TargetedOverride[];
   onScenarioRowsChange?: (rows: YearRow[] | null) => void;
   onDraftChange?: (overrides: TargetedOverride[] | null) => void;
   clearDraftRef?: React.MutableRefObject<(() => void) | null>;
 }) {
-  const { baselinePlan, baselineRows, onScenarioRowsChange, onDraftChange, clearDraftRef } = args;
+  const { baselinePlan, baselineRows, scenarioRows, enabledOverrides, onScenarioRowsChange, onDraftChange, clearDraftRef } = args;
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [composerValue, setComposerValue] = useState("");
@@ -79,12 +85,13 @@ export function usePlannerChat(args: {
   const previewRows = useMemo(() => {
     if (!response || response.mode !== "propose" || proposeOverrides.length === 0) return null;
     try {
-      const yearInputs = buildScenarioYearInputsFromOverrides(baselinePlan, proposeOverrides);
+      const combined = [...enabledOverrides, ...proposeOverrides];
+      const yearInputs = buildScenarioYearInputsFromOverrides(baselinePlan, combined);
       return simulatePlan(baselinePlan, { yearInputs });
     } catch {
       return null;
     }
-  }, [baselinePlan, proposeOverrides, response]);
+  }, [baselinePlan, enabledOverrides, proposeOverrides, response]);
 
   const explanation = useMemo(() => {
     if (!response || response.mode !== "propose" || proposeOverrides.length === 0) return null;
@@ -105,8 +112,11 @@ export function usePlannerChat(args: {
     const userText = composerValue.trim();
     if (!userText) return;
 
-    // Clear immediately on send.
+    // Clear immediately on send. Replace current proposal (new message = fresh proposal).
     setComposerValue("");
+    setResponse(null);
+    setConfirmChecks({});
+    onDraftChange?.(null);
 
     const userMsg: ChatMessage = { id: makeId(), role: "user", content: userText };
     const nextMessages = [...messages, userMsg].slice(-24);
@@ -114,11 +124,14 @@ export function usePlannerChat(args: {
 
     setLoading(true);
     setError(null);
-    setResponse(null);
-    setConfirmChecks({});
 
     try {
-      const context = buildAiPromptPayload(baselinePlan, baselineRows as YearRow[]);
+      const context = buildAiPromptPayload(
+        baselinePlan,
+        baselineRows as YearRow[],
+        scenarioRows as YearRow[],
+        enabledOverrides as TargetedOverride[],
+      );
       const thread = toAiThread(nextMessages).slice(-12);
       const res = await fetch("/api/ai", {
         method: "POST",
@@ -130,6 +143,10 @@ export function usePlannerChat(args: {
       const resp = json as AiPlannerResponse;
 
       setResponse(resp);
+      const overrides = resp.mode === "propose" ? resp.overrides : [];
+      if (overrides.length > 0 && typeof console !== "undefined" && console.log) {
+        console.log("[usePlannerChat] proposal shown, overrides:", overrides.length, overrides[0]);
+      }
       const assistantMsg: ChatMessage = {
         id: makeId(),
         role: "assistant",
@@ -139,6 +156,8 @@ export function usePlannerChat(args: {
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       setError(msg);
+      setResponse(null);
+      onDraftChange?.(null);
       setMessages((prev) => [
         ...prev,
         { id: makeId(), role: "assistant", content: `Sorry — I hit an error.\n\n\`${msg}\`` },
@@ -168,6 +187,19 @@ export function usePlannerChat(args: {
   function clearDraft() {
     setResponse(null);
     setConfirmChecks({});
+    onDraftChange?.(null);
+    if (typeof console !== "undefined" && console.log) {
+      console.log("[usePlannerChat] draft/proposal cleared");
+    }
+  }
+
+  /** Clear draft, message history, and composer input. Use after saving a new card so the chat resets to empty. */
+  function clearDraftAndResetChat() {
+    setResponse(null);
+    setConfirmChecks({});
+    onDraftChange?.(null);
+    setMessages([]);
+    setComposerValue("");
   }
 
   return {
@@ -188,6 +220,7 @@ export function usePlannerChat(args: {
     apply,
     clearApplied,
     clearDraft,
+    clearDraftAndResetChat,
     draftOverrides: proposeOverrides.length > 0 ? proposeOverrides : null,
   };
 }

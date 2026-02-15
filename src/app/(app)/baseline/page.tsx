@@ -62,6 +62,7 @@ function useStoredFormState(): [BaselineFormState, React.Dispatch<React.SetState
         startAge: stored.startAge,
         endAge: stored.endAge,
         userBaseAnnual: stored.household.user.income.baseAnnual,
+        userBonusAnnual: stored.household.user.income.hasBonus ? (stored.household.user.income.bonusAnnual ?? 0) : 0,
         incomeGrowthRate: stored.household.user.income.incomeGrowthRate * 100,
         userHasRetirement: stored.household.user.income.retirement?.hasPlan ?? false,
         userRetirementPreTaxPct: stored.household.user.income.retirement?.employeePreTaxContributionPct ?? 0,
@@ -71,6 +72,7 @@ function useStoredFormState(): [BaselineFormState, React.Dispatch<React.SetState
         userEmployerMatchUpToPct: stored.household.user.income.retirement?.employerMatchUpToPct ?? 0,
         hasPartner: stored.household.hasPartner,
         partnerBaseAnnual: stored.household.partner?.income.baseAnnual ?? 0,
+        partnerBonusAnnual: stored.household.partner?.income.hasBonus ? (stored.household.partner?.income.bonusAnnual ?? 0) : 0,
         partnerHasRetirement: stored.household.partner?.income.retirement?.hasPlan ?? false,
         partnerRetirementPreTaxPct: stored.household.partner?.income.retirement?.employeePreTaxContributionPct ?? 0,
         partnerRetirementRothPct: stored.household.partner?.income.retirement?.employeeRothContributionPct ?? 0,
@@ -171,15 +173,24 @@ export default function BaselineWizardPage() {
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="userBaseAnnual">Annual income (pre-tax)</Label>
+                  <Label htmlFor="userBaseAnnual">Base salary (pre-tax, annual)</Label>
                   <Input
                     id="userBaseAnnual"
                     placeholder="85000"
                     value={form.userBaseAnnual ?? ""}
                     onChange={(e) => update("userBaseAnnual", parseNum(e.target.value))}
                   />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="userBonusAnnual">Annual bonus (pre-tax)</Label>
+                  <Input
+                    id="userBonusAnnual"
+                    placeholder="0"
+                    value={form.userBonusAnnual ?? ""}
+                    onChange={(e) => update("userBonusAnnual", parseNum(e.target.value))}
+                  />
                   <p className="text-xs text-muted-foreground">
-                    Include salary, bonus, and other regular income.
+                    Optional. Same growth rate as base unless overridden in scenarios.
                   </p>
                 </div>
 
@@ -195,15 +206,26 @@ export default function BaselineWizardPage() {
                 </div>
 
                 {form.hasPartner ? (
-                  <div className="space-y-2">
-                    <Label htmlFor="partnerBaseAnnual">Partner annual income (pre-tax)</Label>
-                    <Input
-                      id="partnerBaseAnnual"
-                      placeholder="85000"
-                      value={form.partnerBaseAnnual ?? ""}
-                      onChange={(e) => update("partnerBaseAnnual", parseNum(e.target.value))}
-                    />
-                  </div>
+                  <>
+                    <div className="space-y-2">
+                      <Label htmlFor="partnerBaseAnnual">Partner base salary (pre-tax, annual)</Label>
+                      <Input
+                        id="partnerBaseAnnual"
+                        placeholder="85000"
+                        value={form.partnerBaseAnnual ?? ""}
+                        onChange={(e) => update("partnerBaseAnnual", parseNum(e.target.value))}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="partnerBonusAnnual">Partner annual bonus (pre-tax)</Label>
+                      <Input
+                        id="partnerBonusAnnual"
+                        placeholder="0"
+                        value={form.partnerBonusAnnual ?? ""}
+                        onChange={(e) => update("partnerBonusAnnual", parseNum(e.target.value))}
+                      />
+                    </div>
+                  </>
                 ) : null}
 
                 <div className="grid gap-4 sm:grid-cols-2">

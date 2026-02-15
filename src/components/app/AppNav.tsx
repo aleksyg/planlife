@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { ThemeToggle } from "@/components/app/ThemeToggle";
 
 const NAV = [
   { href: "/baseline", label: "Inputs" },
@@ -46,6 +47,7 @@ export function AppNav() {
         </div>
 
         <div className="flex items-center gap-2">
+          <ThemeToggle />
           <div className="hidden text-xs text-muted-foreground sm:block">Last updated: Today</div>
           <Button variant="outline" size="sm">
             Check-in

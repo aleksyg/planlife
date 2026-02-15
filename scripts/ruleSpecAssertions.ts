@@ -15,8 +15,9 @@ function assertApprox(actual: number, expected: number, eps: number, message: st
   assert(ok, `${message}. expected=${expected} actual=${actual} diff=${actual - expected}`);
 }
 
-function mkPlan(overrides?: { endAge?: number }): PlanState {
+function mkPlan(overrides?: { endAge?: number; hasBonus?: boolean }): PlanState {
   const endAge = overrides?.endAge ?? 33;
+  const hasBonus = overrides?.hasBonus ?? true;
   return {
     asOfYearMonth: "2026-02",
     startAge: 30,
@@ -26,8 +27,8 @@ function mkPlan(overrides?: { endAge?: number }): PlanState {
         age: 30,
         income: {
           baseAnnual: 100_000,
-          hasBonus: true,
-          bonusAnnual: 20_000,
+          hasBonus,
+          bonusAnnual: hasBonus ? 20_000 : undefined,
           incomeGrowthRate: 0.05,
           preTaxDeductionsMonthly: 0,
           retirement: { hasPlan: false },
@@ -165,6 +166,28 @@ function testGrowthFourPercentThenTwoPercent() {
   assertApprox(rows[11]!.grossIncome, baseAt41 + bonus(11), 0.02, "yearIndex 11 grows at 2%");
 }
 
+function testIncomeCapEnforcesCeiling() {
+  const plan = mkPlan({ endAge: 40, hasBonus: false }); // grossIncome = base only when no bonus
+  const cap = 120_000;
+
+  const yi = buildScenarioYearInputsFromOverrides(plan, [
+    {
+      target: "income.user.base",
+      kind: "cap",
+      fromAge: plan.startAge,
+      value: cap,
+    },
+  ]);
+
+  const rows = simulatePlan(plan, { yearInputs: yi });
+
+  for (let i = 0; i < rows.length; i++) {
+    if (rows[i]!.grossIncome > cap + 1) {
+      throw new Error("Income cap violated at yearIndex " + i);
+    }
+  }
+}
+
 function testMultThenSetCollision() {
   const plan = mkPlan({ endAge: 38 });
   const yi = buildScenarioYearInputsFromOverrides(plan, [
@@ -205,6 +228,7 @@ function main() {
   testRaiseInThreeYearsPermanently();
   testGrowthFourPercentThenTwoPercent();
   testMultThenSetCollision();
+  testIncomeCapEnforcesCeiling();
   console.log("ruleSpec assertions: OK");
 }
 

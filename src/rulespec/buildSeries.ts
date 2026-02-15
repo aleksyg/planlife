@@ -39,7 +39,14 @@ function orderOverrides(ops: readonly Override[]): Override[] {
 
 function overrideAppliesAt(op: Override, index: number, tl: Timeline): boolean {
   const fromIdx = yearIndexFromAge(tl, op.fromAge);
-  return index === fromIdx;
+
+  if (op.kind === "set" || op.kind === "add" || op.kind === "mult") {
+    return index === fromIdx;
+  }
+
+  const toIdx = op.toAge != null ? yearIndexFromAge(tl, op.toAge) : null;
+  if (toIdx != null) return index >= fromIdx && index <= toIdx;
+  return index >= fromIdx;
 }
 
 function applyOverrideAt(op: Override, value: number, tl: Timeline): number {
@@ -59,6 +66,9 @@ function applyOverrideAt(op: Override, value: number, tl: Timeline): number {
     if (next < 0) throw new Error("Mult override resulted in negative value.");
     return next;
   }
+  if (op.kind === "cap") {
+    return Math.min(value, op.value);
+  }
   const _: never = op;
   return _;
 }
@@ -77,6 +87,15 @@ export function buildSeries(spec: ComponentSpec, tl: Timeline): number[] {
   const ordered = orderOverrides(spec.overrides);
 
   const out: number[] = [spec.startValue];
+  // Apply overrides at index 0 (e.g. "starting now" when fromAge = startAge)
+  let v0 = out[0]!;
+  for (const op of ordered) {
+    if (overrideAppliesAt(op, 0, tl)) {
+      v0 = applyOverrideAt(op, v0, tl);
+    }
+  }
+  out[0] = v0;
+
   for (let i = 1; i < tl.length; i++) {
     const prev = out[i - 1]!;
     let v: number;

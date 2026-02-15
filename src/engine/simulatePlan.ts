@@ -12,8 +12,16 @@ export type YearRow = {
   grossIncome: number;
   /** User gross annual (base + bonus) for this year. */
   userGrossIncome: number;
+  /** User base salary only. */
+  userBaseIncome: number;
+  /** User bonus only. */
+  userBonusIncome: number;
   /** Partner gross annual when hasPartner; 0 otherwise. */
   partnerGrossIncome: number;
+  /** Partner base only. */
+  partnerBaseIncome: number;
+  /** Partner bonus only. */
+  partnerBonusIncome: number;
   taxableIncome: number;
   taxableIncomeAfterDeduction: number;
   standardDeductionUsed: number;
@@ -489,7 +497,11 @@ export function simulatePlan(plan: PlanState, options?: SimulatePlanOptions): Ye
 
       grossIncome,
       userGrossIncome: userComp.grossAnnual,
+      userBaseIncome: userComp.baseAnnual,
+      userBonusIncome: userComp.bonusAnnual,
       partnerGrossIncome: partnerComp?.grossAnnual ?? 0,
+      partnerBaseIncome: partnerComp?.baseAnnual ?? 0,
+      partnerBonusIncome: partnerComp?.bonusAnnual ?? 0,
       taxableIncome,
       taxableIncomeAfterDeduction,
       standardDeductionUsed,

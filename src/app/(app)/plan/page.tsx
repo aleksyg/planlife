@@ -36,18 +36,33 @@ export default function PlanYourLifePage() {
 
   // Baseline: immutable; never mutated by scenario.
   const rows: YearRow[] = plan ? simulatePlan(plan) : [];
-  // Scenario = baseline + enabled modifiers (+ draft last). Rebuilt from scratch every time.
+  // Scenario = baseline + enabled cards only (no draft). Used for planner API context so LLM never sees draft.
+  const scenarioYearInputsForPlanner = useMemo(
+    () => (plan ? getScenarioYearInputs(plan, cards, null) : []),
+    [plan, cards],
+  );
+  const scenarioRowsForPlanner: YearRow[] =
+    plan && scenarioYearInputsForPlanner.length > 0
+      ? simulatePlan(plan, { yearInputs: scenarioYearInputsForPlanner })
+      : rows;
+  // Full scenario including draft for table/chart display.
   const scenarioYearInputs = useMemo(
     () => (plan ? getScenarioYearInputs(plan, cards, draftOverrides) : []),
     [plan, cards, draftOverrides],
   );
-  // When no active modifiers, scenario equals baseline (use baseline rows). Never leave scenario empty.
   const scenarioRows: YearRow[] =
     plan && scenarioYearInputs.length > 0
       ? simulatePlan(plan, { yearInputs: scenarioYearInputs })
       : rows;
   const currentRows = scenarioRows;
   const hasScenario = cards.some((c) => c.enabled) || (draftOverrides?.length ?? 0) > 0;
+
+  const enabledOverrides = useMemo(() => {
+    return cards
+      .filter((c) => c.enabled)
+      .sort((a, b) => a.createdAt - b.createdAt)
+      .flatMap((c) => c.overrides);
+  }, [cards]);
 
   const persistCards = useCallback((next: ScenarioCard[]) => {
     setCards(next);
@@ -130,6 +145,8 @@ export default function PlanYourLifePage() {
         <ChatPanel
           baselinePlan={plan}
           baselineRows={rows}
+          scenarioRows={scenarioRowsForPlanner}
+          enabledOverrides={enabledOverrides}
           cards={cards}
           draftOverrides={draftOverrides}
           onDraftChange={setDraftOverrides}
@@ -159,7 +176,7 @@ export default function PlanYourLifePage() {
             <CardHeader>
               <CardTitle>Income by year</CardTitle>
               <CardDescription>
-                Baseline vs scenario gross income for review
+                Base and bonus, baseline vs scenario
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -167,34 +184,47 @@ export default function PlanYourLifePage() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-border bg-muted/30">
-                      <th className="px-3 py-2 text-left font-medium">Age</th>
-                      <th className="px-3 py-2 text-right font-medium">User baseline</th>
-                      <th className="px-3 py-2 text-right font-medium">User scenario</th>
-                      <th className="px-3 py-2 text-right font-medium">Partner baseline</th>
-                      <th className="px-3 py-2 text-right font-medium">Partner scenario</th>
+                      <th className="px-2 py-2 text-left font-medium">Age</th>
+                      <th className="px-2 py-2 text-right font-medium">User base (BL)</th>
+                      <th className="px-2 py-2 text-right font-medium">User base (SC)</th>
+                      <th className="px-2 py-2 text-right font-medium">User bonus (BL)</th>
+                      <th className="px-2 py-2 text-right font-medium">User bonus (SC)</th>
+                      <th className="px-2 py-2 text-right font-medium">Partner base (BL)</th>
+                      <th className="px-2 py-2 text-right font-medium">Partner base (SC)</th>
+                      <th className="px-2 py-2 text-right font-medium">Partner bonus (BL)</th>
+                      <th className="px-2 py-2 text-right font-medium">Partner bonus (SC)</th>
                     </tr>
                   </thead>
                   <tbody>
                     {rows.map((row, i) => {
                       const scen = scenarioRows[i];
-                      const userBase = row.userGrossIncome ?? 0;
-                      const userScen = scen?.userGrossIncome ?? 0;
-                      const userHasDiff = hasScenario && Math.abs(userScen - userBase) > 0.5;
-                      const partnerBase = row.partnerGrossIncome ?? 0;
-                      const partnerScen = scen?.partnerGrossIncome ?? 0;
-                      const partnerHasDiff = hasScenario && Math.abs(partnerScen - partnerBase) > 0.5;
+                      const ubBl = row.userBaseIncome ?? 0;
+                      const ubSc = scen?.userBaseIncome ?? 0;
+                      const uBoBl = row.userBonusIncome ?? 0;
+                      const uBoSc = scen?.userBonusIncome ?? 0;
+                      const pbBl = row.partnerBaseIncome ?? 0;
+                      const pbSc = scen?.partnerBaseIncome ?? 0;
+                      const pBoBl = row.partnerBonusIncome ?? 0;
+                      const pBoSc = scen?.partnerBonusIncome ?? 0;
+                      const hasPartner = plan.household.hasPartner;
                       return (
                         <tr key={row.yearIndex} className="border-b border-border/70 last:border-0">
-                          <td className="px-3 py-1.5">{row.age}</td>
-                          <td className="px-3 py-1.5 text-right tabular-nums">{formatCurrency(userBase)}</td>
-                          <td className={`px-3 py-1.5 text-right tabular-nums ${userHasDiff ? "font-medium" : ""}`}>
-                            {formatCurrency(userScen)}
+                          <td className="px-2 py-1.5">{row.age}</td>
+                          <td className="px-2 py-1.5 text-right tabular-nums">{formatCurrency(ubBl)}</td>
+                          <td className={`px-2 py-1.5 text-right tabular-nums ${hasScenario && Math.abs(ubSc - ubBl) > 0.5 ? "font-medium" : ""}`}>
+                            {formatCurrency(ubSc)}
                           </td>
-                          <td className="px-3 py-1.5 text-right tabular-nums">
-                            {plan.household.hasPartner ? formatCurrency(partnerBase) : "—"}
+                          <td className="px-2 py-1.5 text-right tabular-nums">{formatCurrency(uBoBl)}</td>
+                          <td className={`px-2 py-1.5 text-right tabular-nums ${hasScenario && Math.abs(uBoSc - uBoBl) > 0.5 ? "font-medium" : ""}`}>
+                            {formatCurrency(uBoSc)}
                           </td>
-                          <td className={`px-3 py-1.5 text-right tabular-nums ${partnerHasDiff ? "font-medium" : ""}`}>
-                            {plan.household.hasPartner ? formatCurrency(partnerScen) : "—"}
+                          <td className="px-2 py-1.5 text-right tabular-nums">{hasPartner ? formatCurrency(pbBl) : "—"}</td>
+                          <td className={`px-2 py-1.5 text-right tabular-nums ${hasPartner && hasScenario && Math.abs(pbSc - pbBl) > 0.5 ? "font-medium" : ""}`}>
+                            {hasPartner ? formatCurrency(pbSc) : "—"}
+                          </td>
+                          <td className="px-2 py-1.5 text-right tabular-nums">{hasPartner ? formatCurrency(pBoBl) : "—"}</td>
+                          <td className={`px-2 py-1.5 text-right tabular-nums ${hasPartner && hasScenario && Math.abs(pBoSc - pBoBl) > 0.5 ? "font-medium" : ""}`}>
+                            {hasPartner ? formatCurrency(pBoSc) : "—"}
                           </td>
                         </tr>
                       );

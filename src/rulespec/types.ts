@@ -11,7 +11,8 @@ export type GrowthRule =
 export type Override =
   | { kind: "set"; fromAge: number; value: number; toAge?: number }
   | { kind: "add"; fromAge: number; value: number; toAge?: number }
-  | { kind: "mult"; fromAge: number; value: number; toAge?: number };
+  | { kind: "mult"; fromAge: number; value: number; toAge?: number }
+  | { kind: "cap"; fromAge: number; value: number; toAge?: number };
 
 /** Growth rate override: from this age onward use this rate (e.g. 0.04 for 4%). */
 export type GrowthOverride = { fromAge: number; value: number };

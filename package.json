@@ -9,7 +9,8 @@
     "lint": "eslint",
     "test:engine": "tsx scripts/engineAssertions.ts",
     "test:ai": "tsx scripts/aiCompilerAssertions.ts",
-    "test:rulespec": "tsx scripts/ruleSpecAssertions.ts"
+    "test:rulespec": "tsx scripts/ruleSpecAssertions.ts",
+    "test:income": "tsx scripts/incomeIntentAssertions.ts"
   },
   "dependencies": {
     "@radix-ui/react-select": "^2.2.6",
