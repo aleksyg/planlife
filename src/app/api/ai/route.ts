@@ -1,5 +1,5 @@
 import OpenAI from "openai";
-import type { AiChatMessage, AiPlannerResponse, TargetedOverride } from "@/ai/types";
+import type { AiChatMessage, AiPlannerResponse, AiHelperResponse, TargetedOverride } from "@/ai/types";
 import type { AiPromptPayload } from "@/ai/promptPayload";
 import { getLastUserText, promptMentionsPartner } from "@/ai/compiler/promptFacts";
 import { computeConfirmationsRequiredFromOverrides, isPartnerOverrideTarget } from "@/ai/compiler/confirmations";
@@ -50,7 +50,7 @@ function getJsonSchema() {
       type: "object",
       additionalProperties: false,
       properties: {
-        mode: { enum: ["clarify", "propose"] },
+        mode: { enum: ["clarify", "propose", "open_helper"] },
         questions: { type: ["array", "null"], items: { type: "string" } },
         assumptions: { type: ["array", "null"], items: { type: "string" } },
         draftScenarioSummary: { type: ["string", "null"] },
@@ -124,6 +124,10 @@ function getJsonSchema() {
           },
           required: ["person", "milestones", "cap", "resolutionPolicy"],
         },
+        helper: { type: ["string", "null"], enum: ["income", "home", "expense", "retirement", "oneTimeEvent", null] },
+        prefill: { type: ["object", "null"], additionalProperties: true },
+        openHelperMessage: { type: ["string", "null"] },
+        openHelperAssumptions: { type: ["array", "null"], items: { type: "string" } },
       },
       required: [
         "mode",
@@ -134,6 +138,10 @@ function getJsonSchema() {
         "overrides",
         "totalCompTarget",
         "totalCompConstraint",
+        "helper",
+        "prefill",
+        "openHelperMessage",
+        "openHelperAssumptions",
       ],
     },
   } as const;
@@ -298,8 +306,11 @@ function parseTotalCompConstraint(obj: unknown): TotalCompConstraint | null {
   return { person, milestones, cap, resolutionPolicy: rp };
 }
 
+const HELPER_TYPES = ["income", "home", "expense", "retirement", "oneTimeEvent"] as const;
+type HelperType = (typeof HELPER_TYPES)[number];
+
 function validatePlannerShape(obj: unknown): {
-  mode: "clarify" | "propose";
+  mode: "clarify" | "propose" | "open_helper";
   questions: string[] | null;
   assumptions: string[] | null;
   draftScenarioSummary: string | null;
@@ -307,10 +318,14 @@ function validatePlannerShape(obj: unknown): {
   overrides: unknown[] | null;
   totalCompTarget: { fromAge: number; value: number; who: "user" | "partner" } | null;
   totalCompConstraint: TotalCompConstraint | null;
+  helper: HelperType | null;
+  prefill: Record<string, unknown> | null;
+  openHelperMessage: string | null;
+  openHelperAssumptions: string[] | null;
 } | null {
   if (!isRecord(obj)) return null;
   const mode = obj["mode"];
-  if (mode !== "clarify" && mode !== "propose") return null;
+  if (mode !== "clarify" && mode !== "propose" && mode !== "open_helper") return null;
   const questions = Array.isArray(obj["questions"]) ? (obj["questions"] as unknown[]).filter((x) => typeof x === "string") as string[] : null;
   const assumptions = Array.isArray(obj["assumptions"]) ? (obj["assumptions"] as unknown[]).filter((x) => typeof x === "string") as string[] : null;
   const draftScenarioSummary = typeof obj["draftScenarioSummary"] === "string" ? (obj["draftScenarioSummary"] as string) : null;
@@ -325,7 +340,29 @@ function validatePlannerShape(obj: unknown): {
     totalCompTarget = { fromAge: tct["fromAge"], value: tct["value"], who: tct["who"] };
   }
   const totalCompConstraint = parseTotalCompConstraint(obj["totalCompConstraint"]);
-  return { mode, questions, assumptions, draftScenarioSummary, impactPreviewRequest, overrides, totalCompTarget, totalCompConstraint };
+  const helperRaw = obj["helper"];
+  const helper =
+    typeof helperRaw === "string" && HELPER_TYPES.includes(helperRaw as HelperType) ? (helperRaw as HelperType) : null;
+  const prefillRaw = obj["prefill"];
+  const prefill = prefillRaw != null && typeof prefillRaw === "object" ? (prefillRaw as Record<string, unknown>) : {};
+  const openHelperMessage = typeof obj["openHelperMessage"] === "string" ? obj["openHelperMessage"] : null;
+  const openHelperAssumptions = Array.isArray(obj["openHelperAssumptions"])
+    ? (obj["openHelperAssumptions"] as unknown[]).filter((x) => typeof x === "string") as string[]
+    : null;
+  return {
+    mode,
+    questions,
+    assumptions,
+    draftScenarioSummary,
+    impactPreviewRequest,
+    overrides,
+    totalCompTarget,
+    totalCompConstraint,
+    helper,
+    prefill: prefill ?? null,
+    openHelperMessage,
+    openHelperAssumptions,
+  };
 }
 
 /** Deterministic: base so that base + bonusAtFromAge = targetTotalComp. Uses bonus at same age from context, or specifiedBonus when provided (BONUS_AND_TOTAL_COMP). */
@@ -453,7 +490,7 @@ export async function POST(req: Request) {
     "context.currentValues reflects the current scenario after applying all enabled cards. Propose only the additional changes needed from the current scenario; do not restate existing enabled overrides.",
     "Income semantics: When user asks for total comp (e.g. 'income to 800k', 'make 800k', 'total comp 800k') at a single age, output totalCompTarget: { fromAge, value, who }. Do NOT output income.user.base for that — the server computes base from bonus. For multi-year targets (e.g. '$1M in 4 years, $2M in 10 years') or a cap (e.g. 'cap at $2.5M'), output totalCompConstraint: { person, milestones: [{ age, value }, ...], cap?: { value, startAge }, resolutionPolicy: 'BASE_ONLY' | 'BONUS_ONLY' | 'PROPORTIONAL' | 'ASK' }. If the user does not specify how to hit the targets, use resolutionPolicy: 'ASK' so the server can ask. Only output income.user.base or income.user.bonus overrides when user explicitly says 'base'/'salary' or 'bonus'. Caps are enforced as hard ceilings (no growth above cap).",
     "When user says 'back to normal' or 'go back to normal' after a temporary range: add a second override at rejoin age (first year after the range) setting income.user.base to context.series.baselineUserBaseByYear[rejoinYearIndex] so total comp rejoins the baseline path. Add assumption: 'Back to normal means rejoining your baseline total compensation at age X.'",
-    "Classify the user message into either mode='clarify' (ask questions, no overrides) or mode='propose' (assumptions + overrides).",
+    "Classify the user message: mode='clarify' (ask questions), mode='propose' (assumptions + overrides), or mode='open_helper' when the user wants to edit income/retirement/home/expense via a form. For open_helper: set helper to 'income'|'home'|'expense'|'retirement'|'oneTimeEvent', prefill with inferred values (e.g. baseAnnual, growthRate), and openHelperMessage with a short sentence. Do NOT return overrides when mode=open_helper.",
     "Return JSON only and conform to the provided JSON Schema.",
     "Propose overrides with: target (e.g. income.user.base, income.user.bonus, spend.lifestyle), kind (set|add|mult|cap), fromAge (plan age), toAge (number or null), value.",
     "Use fromAge (plan age), not yearIndex. age = context.currentValues.startAge + yearIndex.",
@@ -565,6 +602,19 @@ export async function POST(req: Request) {
       mode: "clarify",
       questions: shape.questions ?? [],
       assumptions: shape.assumptions ?? [],
+    };
+    return Response.json(out);
+  }
+
+  if (shape.mode === "open_helper") {
+    const helper = shape.helper ?? "income";
+    const prefill = shape.prefill ?? {};
+    const out: AiHelperResponse = {
+      mode: "open_helper",
+      helper: HELPER_TYPES.includes(helper) ? helper : "income",
+      prefill: typeof prefill === "object" ? prefill : {},
+      assumptions: shape.openHelperAssumptions ?? shape.assumptions ?? [],
+      message: shape.openHelperMessage ?? undefined,
     };
     return Response.json(out);
   }

@@ -13,6 +13,12 @@ import { MessageList } from "./MessageList";
 import { ProposalCard } from "./ProposalCard";
 import { usePlannerChat } from "./usePlannerChat";
 
+export type PendingHelperOpen = {
+  helper: "income" | "home" | "expense" | "retirement" | "oneTimeEvent";
+  prefill: Record<string, unknown>;
+  assumptions: string[];
+};
+
 export function ChatPanel(props: {
   baselinePlan: PlanState;
   baselineRows: readonly YearRow[];
@@ -22,6 +28,7 @@ export function ChatPanel(props: {
   draftOverrides: TargetedOverride[] | null;
   onDraftChange: (overrides: TargetedOverride[] | null) => void;
   onSaveDraft: (overrides: TargetedOverride[], title?: string, summary?: string) => void;
+  onOpenHelper?: (helper: PendingHelperOpen["helper"], prefill: Record<string, unknown>) => void;
   clearDraftRef?: MutableRefObject<(() => void) | null>;
 }) {
   const {
@@ -39,6 +46,7 @@ export function ChatPanel(props: {
     clearDraft,
     clearDraftAndResetChat,
     draftOverrides: hookDraftOverrides,
+    pendingHelperOpen,
   } = usePlannerChat({
     baselinePlan: props.baselinePlan,
     baselineRows: props.baselineRows,
@@ -53,6 +61,19 @@ export function ChatPanel(props: {
 
   const proposal = response?.mode === "propose" ? response : null;
   const changes = useMemo(() => explanation?.changes ?? [], [explanation]);
+
+  const helperButtonLabel =
+    pendingHelperOpen?.helper === "income"
+      ? "Open Income Editor"
+      : pendingHelperOpen?.helper === "retirement"
+        ? "Open Retirement Editor"
+        : pendingHelperOpen?.helper === "home"
+          ? "Open Home Purchase Editor"
+          : pendingHelperOpen?.helper === "expense"
+            ? "Open Expense Editor"
+            : pendingHelperOpen?.helper === "oneTimeEvent"
+              ? "Open One-Time Event Editor"
+              : "Open Editor";
 
   const handleSaveAsNewCard = () => {
     if (!proposal || (hookDraftOverrides?.length ?? 0) === 0) return;
@@ -130,7 +151,16 @@ export function ChatPanel(props: {
         ) : null}
       </div>
 
-      {proposal ? (
+      {pendingHelperOpen ? (
+        <div className="shrink-0 border-t border-border bg-card px-4 py-3 flex items-center gap-2">
+          <Button
+            className="rounded-2xl"
+            onClick={() => props.onOpenHelper?.(pendingHelperOpen.helper, pendingHelperOpen.prefill)}
+          >
+            {helperButtonLabel}
+          </Button>
+        </div>
+      ) : proposal ? (
         <div className="shrink-0 border-t border-border bg-card px-4 py-3 flex items-center gap-2">
           <Button
             className="rounded-2xl"

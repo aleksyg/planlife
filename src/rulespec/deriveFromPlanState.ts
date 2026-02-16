@@ -50,6 +50,7 @@ export function deriveRuleSpecInputsFromPlanState(plan: PlanState): RuleSpecInpu
               startValue: pIncome.hasBonus ? (pIncome.bonusAnnual ?? 0) : 0,
               growthPct: pIncome.incomeGrowthRate,
             }),
+            observedBaseNetPayMonthlyOverrides: [],
           };
         })()
       : undefined;
@@ -61,7 +62,7 @@ export function deriveRuleSpecInputsFromPlanState(plan: PlanState): RuleSpecInpu
     timeline,
     partnerEnabled,
     income: {
-      user: { base: userBase, bonus: userBonus },
+      user: { base: userBase, bonus: userBonus, observedBaseNetPayMonthlyOverrides: [] },
       partner,
     },
     spend: { lifestyleMonthly: spendLifestyle, housingMonthly: spendHousing },

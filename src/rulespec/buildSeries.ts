@@ -8,6 +8,7 @@ function assertFinite(n: number, msg: string) {
 /**
  * Active growth rate at each index (carried-forward array with point overrides).
  * For pct: from growthOverrides (last applicable) or spec.growth.annualPct.
+ * Invariant: Growth overrides replace baseline growth; they do not add to it.
  */
 function buildGrowthByIndex(spec: ComponentSpec, tl: Timeline): number[] {
   return Array.from({ length: tl.length }, (_, idx) => {

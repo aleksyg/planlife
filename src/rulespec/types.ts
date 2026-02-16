@@ -26,6 +26,8 @@ export type TargetKey =
   | "income.partner.base.growthPct"
   | "income.user.bonus.growthPct"
   | "income.partner.bonus.growthPct"
+  | "income.user.observedBaseNetPayMonthly"
+  | "income.partner.observedBaseNetPayMonthly"
   | "spend.lifestyle"
   | "spend.housing";
 
@@ -47,10 +49,13 @@ export type RuleSpecInputs = {
     user: {
       base: ComponentSpec;
       bonus: ComponentSpec;
+      /** Observed monthly take-home overrides (base pay only). Not a ComponentSpec. */
+      observedBaseNetPayMonthlyOverrides: Override[];
     };
     partner?: {
       base: ComponentSpec;
       bonus: ComponentSpec;
+      observedBaseNetPayMonthlyOverrides: Override[];
     };
   };
 

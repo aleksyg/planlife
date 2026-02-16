@@ -438,9 +438,58 @@ export function simulatePlan(plan: PlanState, options?: SimulatePlanOptions): Ye
       grossIncome - retirement.employeePreTax - householdPreTaxDeductionsAnnual - taxesPaid,
     );
 
-    // Payroll-correct cashflow: Roth is deducted after tax; outflows come from take-home.
-    const takeHomeAfterRoth = afterTaxIncome - retirement.employeeRoth;
-    const annualSavings = takeHomeAfterRoth - annualOutflow;
+    // Cashflow: base vs bonus split. Taxes unchanged (always from gross).
+    const totalBonus = userComp.bonusAnnual + (partnerComp?.bonusAnnual ?? 0);
+    let netBonusCash = 0;
+    let modeledBaseTakeHome = 0;
+
+    if (totalBonus > 0) {
+      const grossBaseOnly = userComp.baseAnnual + (partnerComp?.baseAnnual ?? 0);
+      const taxableBaseOnly = Math.max(
+        0,
+        grossBaseOnly - retirement.employeePreTax - householdPreTaxDeductionsAnnual,
+      );
+      const taxableAfterDedBaseOnly = Math.max(0, taxableBaseOnly - standardDeductionUsed);
+      const federalBaseOnly = computeFederalIncomeTax(taxableAfterDedBaseOnly, filingStatus);
+      const stateBaseOnly = round2(taxableAfterDedBaseOnly * stateTaxRate);
+      const userFicaBaseOnly = Math.max(0, userComp.baseAnnual - userPreTaxDeductionsAnnual);
+      const partnerFicaBaseOnly = Math.max(
+        0,
+        (partnerComp?.baseAnnual ?? 0) - partnerPreTaxDeductionsAnnual,
+      );
+      const payrollBaseOnly = computeEmployeePayrollTaxes(
+        { user: userFicaBaseOnly, partner: partnerFicaBaseOnly },
+        filingStatus,
+      );
+      const taxesBaseOnly = round2(federalBaseOnly + stateBaseOnly + payrollBaseOnly.total);
+      const incrementalTaxOnBonus = round2(taxesPaid - taxesBaseOnly);
+      netBonusCash = round2(Math.max(0, totalBonus - incrementalTaxOnBonus));
+      modeledBaseTakeHome = round2(
+        afterTaxIncome - retirement.employeeRoth - totalBonus + incrementalTaxOnBonus,
+      );
+    } else {
+      modeledBaseTakeHome = round2(afterTaxIncome - retirement.employeeRoth);
+    }
+
+    const totalBase = userComp.baseAnnual + (partnerComp?.baseAnnual ?? 0);
+    const userShare = totalBase > 0 ? userComp.baseAnnual / totalBase : 1;
+    const partnerShare = totalBase > 0 ? (partnerComp?.baseAnnual ?? 0) / totalBase : 0;
+
+    const userObserved = yiSafe?.user?.observedBaseNetPayMonthly;
+    const partnerObserved = yiSafe?.partner?.observedBaseNetPayMonthly;
+
+    const userBaseCash =
+      userObserved != null
+        ? round2(userObserved * 12)
+        : round2(modeledBaseTakeHome * userShare);
+    const partnerBaseCash =
+      partnerObserved != null
+        ? round2(partnerObserved * 12)
+        : round2(modeledBaseTakeHome * partnerShare);
+
+    const cashInFromBase = round2(userBaseCash + partnerBaseCash);
+    const cashAvailableForOutflows = round2(cashInFromBase + netBonusCash);
+    const annualSavings = round2(cashAvailableForOutflows - annualOutflow);
     const oneTimeNet = round2((yiSafe?.oneTimeEvents ?? []).reduce((s, e) => s + (e.amount ?? 0), 0));
     const annualSavingsIncludingEvents = round2(annualSavings + oneTimeNet);
 

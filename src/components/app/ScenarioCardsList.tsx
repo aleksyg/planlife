@@ -46,7 +46,7 @@ export function ScenarioCardsList(props: {
                   </div>
                 </label>
                 <div className="flex shrink-0 items-center gap-1">
-                  {onEdit ? (
+                  {onEdit && card.config ? (
                     <Button variant="ghost" size="sm" className="h-8 px-2 text-xs" onClick={() => onEdit(card.id)}>
                       Edit
                     </Button>

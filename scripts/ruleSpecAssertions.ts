@@ -1,5 +1,6 @@
 import { simulatePlan } from "../src/engine/simulatePlan";
 import type { PlanState, YearInputs } from "../src/engine/types/planState";
+import type { TargetedOverride } from "../src/rulespec/types";
 import {
   buildScenarioYearInputsFromOverrides,
   buildSeries,
@@ -218,6 +219,66 @@ function testRangedSetThenCompoundForward() {
   assertApprox(rows[3]!.grossIncome, 80_000 * 1.05 * 1.05 + bonusY3, 0.02, "yearIndex 3 compounds from range end (anchor+growth)");
 }
 
+/** observedBaseNetPayMonthly: savings changes but taxesPaid does NOT change. */
+function testObservedNetAffectsSavingsNotTaxes() {
+  const plan = mkPlan({ endAge: 33 });
+  const base = simulatePlan(plan);
+  const observedMonthly = 5500;
+  const yi = buildScenarioYearInputsFromOverrides(plan, [
+    {
+      target: "income.user.observedBaseNetPayMonthly",
+      kind: "set",
+      fromAge: plan.startAge,
+      value: observedMonthly,
+    } as TargetedOverride,
+  ]);
+  const rows = simulatePlan(plan, { yearInputs: yi });
+
+  assertApprox(rows[0]!.taxesPaid, base[0]!.taxesPaid, 0.02, "taxesPaid unchanged with observed net");
+  assertApprox(rows[1]!.taxesPaid, base[1]!.taxesPaid, 0.02, "taxesPaid unchanged year 1");
+  assert(Math.abs(rows[0]!.annualSavings - base[0]!.annualSavings) > 1, "savings should differ with observed net");
+}
+
+/** observedBaseNetPayMonthly + bonus: bonus still increases cashflow. */
+function testObservedNetWithBonusIncreasesCashflow() {
+  const plan = mkPlan({ endAge: 33 });
+  const observedMonthly = 5000;
+  const annualOutflow = (2000 + 3000) * 12;
+  const cashFromBaseOnly = observedMonthly * 12;
+  const yi = buildScenarioYearInputsFromOverrides(plan, [
+    {
+      target: "income.user.observedBaseNetPayMonthly",
+      kind: "set",
+      fromAge: plan.startAge,
+      value: observedMonthly,
+    } as TargetedOverride,
+  ]);
+  const rows = simulatePlan(plan, { yearInputs: yi });
+  const savingsWithBonus = rows[0]!.annualSavings;
+  const savingsIfBaseOnly = cashFromBaseOnly - annualOutflow;
+  assert(savingsWithBonus > savingsIfBaseOnly + 1000, "bonus should add to cashflow");
+}
+
+/** observedBaseNetPayMonthly = 0: explicit zero is applied (no reversion). */
+function testObservedNetZeroIsExplicit() {
+  const plan = mkPlan({ endAge: 33 });
+  const yi = buildScenarioYearInputsFromOverrides(plan, [
+    {
+      target: "income.user.observedBaseNetPayMonthly",
+      kind: "set",
+      fromAge: plan.startAge,
+      value: 0,
+    } as TargetedOverride,
+  ]);
+  const rows = simulatePlan(plan, { yearInputs: yi });
+  const base = simulatePlan(plan);
+  const annualOutflow = (2000 + 3000) * 12;
+  const cashFromBaseWithZero = 0;
+  const bonusY0 = 20_000;
+  const netBonusEst = bonusY0 * 0.7; // rough net after incremental tax
+  assert(rows[0]!.annualSavings < base[0]!.annualSavings + 500, "observed 0 should reduce savings vs modeled");
+}
+
 function main() {
   testBaselineParityViaYearInputs();
   testNonDestructiveBonusMerge();
@@ -229,6 +290,9 @@ function main() {
   testGrowthFourPercentThenTwoPercent();
   testMultThenSetCollision();
   testIncomeCapEnforcesCeiling();
+  testObservedNetAffectsSavingsNotTaxes();
+  testObservedNetWithBonusIncreasesCashflow();
+  testObservedNetZeroIsExplicit();
   console.log("ruleSpec assertions: OK");
 }
 

@@ -1,9 +1,21 @@
 import type { PlanState, YearInputs } from "@/engine";
 import { buildSeries } from "./buildSeries";
-import type { RuleSpecInputs } from "./types";
+import type { Override, RuleSpecInputs } from "./types";
 
 function assertLength(name: string, arr: readonly number[], n: number) {
   if (arr.length !== n) throw new Error(`${name} must have length ${n} (got ${arr.length}).`);
+}
+
+function getObservedNetAtYearIndex(overrides: Override[], yearIndex: number, startAge: number): number | undefined {
+  const age = startAge + yearIndex;
+  let value: number | undefined;
+  for (const op of overrides) {
+    if (op.fromAge > age) continue;
+    const toAge = op.toAge;
+    if (toAge != null && age > toAge) continue;
+    value = op.value;
+  }
+  return value;
 }
 
 /**
@@ -42,11 +54,24 @@ export function materializeYearInputs(_plan: PlanState, specs: RuleSpecInputs): 
       housingMonthly: housing[yearIndex]!,
     };
 
-    if (partnerBase && partnerBonus) {
+    const observedUser = getObservedNetAtYearIndex(
+      specs.income.user.observedBaseNetPayMonthlyOverrides,
+      yearIndex,
+      specs.timeline.startAge,
+    );
+    if (observedUser !== undefined) yi.user!.observedBaseNetPayMonthly = observedUser;
+
+    if (partnerBase && partnerBonus && specs.income.partner) {
       yi.partner = {
         baseAnnual: partnerBase[yearIndex]!,
         bonusAnnual: partnerBonus[yearIndex]!,
       };
+      const observedPartner = getObservedNetAtYearIndex(
+        specs.income.partner.observedBaseNetPayMonthlyOverrides,
+        yearIndex,
+        specs.timeline.startAge,
+      );
+      if (observedPartner !== undefined) yi.partner!.observedBaseNetPayMonthly = observedPartner;
     }
 
     return yi;

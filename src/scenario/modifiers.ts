@@ -1,10 +1,12 @@
 import type { PlanState, YearInputs } from "@/engine";
 import { buildScenarioYearInputsFromOverrides } from "@/rulespec";
 import type { TargetedOverride } from "@/rulespec/types";
+import type { ScenarioCardConfig } from "./cardConfig";
 
 /**
  * A saved scenario modifier card. Applied in createdAt order; later cards override earlier
  * when modifying the same field and year.
+ * Config-based cards have config; overrides are derived from config for compatibility.
  */
 export type ScenarioCard = {
   id: string;
@@ -13,6 +15,7 @@ export type ScenarioCard = {
   summary: string;
   enabled: boolean;
   overrides: TargetedOverride[];
+  config?: ScenarioCardConfig;
 };
 
 /**

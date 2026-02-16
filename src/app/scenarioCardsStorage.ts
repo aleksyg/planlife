@@ -1,6 +1,7 @@
 "use client";
 
 import type { ScenarioCard } from "@/scenario/modifiers";
+import { parseScenarioCardConfig } from "@/scenario/cardConfig";
 
 const STORAGE_KEY = "planlife-scenario-cards";
 
@@ -35,6 +36,8 @@ function parseCard(raw: unknown): ScenarioCard | null {
     if (!isTargetedOverride(item)) return null;
     parsed.push(item);
   }
+  const config = parseScenarioCardConfig(o.config);
+
   return {
     id,
     createdAt,
@@ -42,6 +45,7 @@ function parseCard(raw: unknown): ScenarioCard | null {
     summary: summary ?? "",
     enabled,
     overrides: parsed,
+    ...(config ? { config } : {}),
   };
 }
 
@@ -76,6 +80,7 @@ export function createScenarioCard(args: {
   title: string;
   summary: string;
   overrides: import("@/rulespec/types").TargetedOverride[];
+  config?: import("@/scenario/cardConfig").ScenarioCardConfig;
 }): ScenarioCard {
   return {
     id: typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `card-${Date.now()}`,
@@ -84,5 +89,25 @@ export function createScenarioCard(args: {
     summary: args.summary ?? "",
     enabled: true,
     overrides: [...args.overrides],
+    ...(args.config ? { config: args.config } : {}),
   };
+}
+
+function incomeSummary(cfg: import("@/scenario/cardConfig").IncomeConfig): string {
+  let s = `Base $${(cfg.baseAnnual / 1000).toFixed(0)}k, bonus $${((cfg.bonusAnnual ?? 0) / 1000).toFixed(0)}k from age ${cfg.startAge}`;
+  if (cfg.observedBaseNetPayMonthly !== undefined && Number.isFinite(cfg.observedBaseNetPayMonthly)) {
+    s += ". Using observed monthly take-home for cashflow; taxes still estimated from gross income. Observed take-home excludes bonuses/equity.";
+  }
+  return s;
+}
+
+/** Create a scenario card from config; derives overrides and title/summary. */
+export function createScenarioCardFromConfig(
+  cfg: import("@/scenario/cardConfig").ScenarioCardConfig,
+  overrides: import("@/rulespec/types").TargetedOverride[],
+): ScenarioCard {
+  const title = cfg.type === "income" ? "Income change" : "Scenario change";
+  const summary =
+    cfg.type === "income" ? incomeSummary(cfg) : "";
+  return createScenarioCard({ title, summary, overrides, config: cfg });
 }

@@ -10,14 +10,18 @@ import {
   loadScenarioCards,
   saveScenarioCards,
   createScenarioCard,
+  createScenarioCardFromConfig,
 } from "@/app/scenarioCardsStorage";
 import type { ScenarioCard } from "@/scenario/modifiers";
 import { getScenarioYearInputs } from "@/scenario/modifiers";
+import { buildOverridesFromCardConfig } from "@/scenario/configToOverrides";
+import type { IncomeConfig } from "@/scenario/cardConfig";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ProjectionBars } from "@/components/app/ProjectionBars";
 import { ScenarioCardsList } from "@/components/app/ScenarioCardsList";
 import { ChatPanel } from "@/components/app/chat/ChatPanel";
+import { IncomeHelperModal } from "@/components/helpers/IncomeHelperModal";
 
 function formatCurrency(n: number): string {
   return new Intl.NumberFormat("en-US", {
@@ -33,6 +37,9 @@ export default function PlanYourLifePage() {
   const [cards, setCards] = useState<ScenarioCard[]>(() => loadScenarioCards());
   const [draftOverrides, setDraftOverrides] = useState<TargetedOverride[] | null>(null);
   const clearDraftRef = useRef<(() => void) | null>(null);
+  const [incomeModalOpen, setIncomeModalOpen] = useState(false);
+  const [incomeModalPrefill, setIncomeModalPrefill] = useState<Record<string, unknown>>({});
+  const [editingCardId, setEditingCardId] = useState<string | null>(null);
 
   // Baseline: immutable; never mutated by scenario.
   const rows: YearRow[] = plan ? simulatePlan(plan) : [];
@@ -106,6 +113,64 @@ export default function PlanYourLifePage() {
     [],
   );
 
+  const handleOpenHelper = useCallback(
+    (helper: "income" | "home" | "expense" | "retirement" | "oneTimeEvent", prefill: Record<string, unknown>) => {
+      if (helper === "income") {
+        setIncomeModalPrefill(prefill);
+        setEditingCardId(null);
+        setIncomeModalOpen(true);
+      }
+    },
+    [],
+  );
+
+  const handleIncomeSave = useCallback(
+    (config: IncomeConfig) => {
+      if (!plan) return;
+      const overrides = buildOverridesFromCardConfig(plan, config);
+      if (editingCardId) {
+        const card = cards.find((c) => c.id === editingCardId);
+        if (card) {
+          // Edit: fully replace config and overrides. Invariant: card.overrides must be derivable from card.config alone.
+          const summary =
+            `Base $${(config.baseAnnual / 1000).toFixed(0)}k, bonus $${((config.bonusAnnual ?? 0) / 1000).toFixed(0)}k from age ${config.startAge}` +
+            (config.observedBaseNetPayMonthly !== undefined && Number.isFinite(config.observedBaseNetPayMonthly)
+              ? ". Using observed monthly take-home for cashflow; taxes still estimated from gross income. Observed take-home excludes bonuses/equity."
+              : "");
+          const updated: ScenarioCard = {
+            ...card,
+            config,
+            overrides: [...overrides],
+            title: "Income change",
+            summary,
+          };
+          const next = cards.map((c) => (c.id === editingCardId ? updated : c));
+          setCards(next);
+          saveScenarioCards(next);
+        }
+      } else {
+        const card = createScenarioCardFromConfig(config, overrides);
+        setCards((prev) => {
+          const next = [...prev, card];
+          saveScenarioCards(next);
+          return next;
+        });
+      }
+      setEditingCardId(null);
+      setIncomeModalOpen(false);
+      clearDraftRef.current?.();
+    },
+    [plan, editingCardId, cards],
+  );
+
+  const handleEditCard = useCallback((id: string) => {
+    const card = cards.find((c) => c.id === id);
+    if (!card?.config || card.config.type !== "income") return;
+    setEditingCardId(id);
+    setIncomeModalPrefill({});
+    setIncomeModalOpen(true);
+  }, [cards]);
+
   if (!plan) {
     return (
       <div className="mx-auto max-w-xl text-center">
@@ -138,6 +203,7 @@ export default function PlanYourLifePage() {
               cards={cards}
               onToggle={handleToggleCard}
               onDelete={handleDeleteCard}
+              onEdit={handleEditCard}
             />
           </CardContent>
         </Card>
@@ -151,6 +217,7 @@ export default function PlanYourLifePage() {
           draftOverrides={draftOverrides}
           onDraftChange={setDraftOverrides}
           onSaveDraft={handleSaveDraft}
+          onOpenHelper={handleOpenHelper}
           clearDraftRef={clearDraftRef}
         />
         </div>
@@ -258,6 +325,24 @@ export default function PlanYourLifePage() {
           </Card>
         </div>
       </div>
+
+      {plan && (
+        <IncomeHelperModal
+          isOpen={incomeModalOpen}
+          onClose={() => {
+            setIncomeModalOpen(false);
+            setEditingCardId(null);
+          }}
+          baselinePlan={plan}
+          prefill={incomeModalPrefill}
+          existingConfig={
+            editingCardId
+              ? (cards.find((c) => c.id === editingCardId)?.config as IncomeConfig | undefined)
+              : undefined
+          }
+          onSave={handleIncomeSave}
+        />
+      )}
     </div>
   );
 }

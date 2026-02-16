@@ -55,6 +55,32 @@ function appendOverride(specs: RuleSpecInputs, target: TargetKey, op: Override):
       return appendGrowthOverride(specs, target, { fromAge: op.fromAge, value: op.value });
     case "income.partner.bonus.growthPct":
       return appendGrowthOverride(specs, target, { fromAge: op.fromAge, value: op.value });
+    case "income.user.observedBaseNetPayMonthly":
+      return {
+        ...specs,
+        income: {
+          ...specs.income,
+          user: {
+            ...specs.income.user,
+            observedBaseNetPayMonthlyOverrides: [...specs.income.user.observedBaseNetPayMonthlyOverrides, op],
+          },
+        },
+      };
+    case "income.partner.observedBaseNetPayMonthly": {
+      if (!specs.partnerEnabled || !specs.income.partner) {
+        throw new Error("Cannot apply partner override: partner is not enabled.");
+      }
+      return {
+        ...specs,
+        income: {
+          ...specs.income,
+          partner: {
+            ...specs.income.partner,
+            observedBaseNetPayMonthlyOverrides: [...specs.income.partner.observedBaseNetPayMonthlyOverrides, op],
+          },
+        },
+      };
+    }
     default: {
       const _: never = target;
       return assertNever(_);

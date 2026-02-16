@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { PlanState } from "@/engine";
 import type { YearRow } from "@/engine";
-import type { AiChatMessage, AiPlannerResponse } from "@/ai/types";
+import type { AiChatMessage, AiUiResponse, AiHelperResponse } from "@/ai/types";
 import type { TargetedOverride } from "@/ai/types";
 import { buildAiPromptPayload } from "@/ai/promptPayload";
 import { explainAiProposal } from "@/ai/describeProposal";
@@ -20,7 +20,10 @@ function toAiThread(messages: readonly ChatMessage[]): AiChatMessage[] {
   return messages.map((m) => ({ role: m.role, content: m.content }));
 }
 
-function assistantTextFromResponse(resp: AiPlannerResponse): string {
+function assistantTextFromResponse(resp: AiUiResponse): string {
+  if (resp.mode === "open_helper") {
+    return resp.message ?? `Sounds like you want to adjust ${resp.helper}. Open the ${helperLabel(resp.helper)}?`;
+  }
   if (resp.mode === "clarify") {
     const parts: string[] = [];
     if (resp.questions?.length) {
@@ -43,6 +46,17 @@ function assistantTextFromResponse(resp: AiPlannerResponse): string {
   return lines.length ? lines.join("\n\n") : "Proposal ready. Review below and save as new card when ready.";
 }
 
+function helperLabel(helper: AiHelperResponse["helper"]): string {
+  switch (helper) {
+    case "income": return "Income Editor";
+    case "home": return "Home Purchase Editor";
+    case "expense": return "Expense Editor";
+    case "retirement": return "Retirement Editor";
+    case "oneTimeEvent": return "One-Time Event Editor";
+    default: return "Editor";
+  }
+}
+
 export function usePlannerChat(args: {
   baselinePlan: PlanState;
   baselineRows: readonly YearRow[];
@@ -58,8 +72,8 @@ export function usePlannerChat(args: {
   const [composerValue, setComposerValue] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [response, setResponse] = useState<AiPlannerResponse | null>(null);
-  const [appliedResponse, setAppliedResponse] = useState<AiPlannerResponse | null>(null);
+  const [response, setResponse] = useState<AiUiResponse | null>(null);
+  const [appliedResponse, setAppliedResponse] = useState<AiUiResponse | null>(null);
   const [confirmChecks, setConfirmChecks] = useState<Record<string, boolean>>({});
 
   const proposeOverrides = useMemo(() => {
@@ -141,7 +155,7 @@ export function usePlannerChat(args: {
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json?.error ?? "AI request failed.");
-      const resp = json as AiPlannerResponse;
+      const resp = json as AiUiResponse;
 
       setResponse(resp);
       const overrides = resp.mode === "propose" ? resp.overrides : [];
@@ -223,6 +237,10 @@ export function usePlannerChat(args: {
     clearDraft,
     clearDraftAndResetChat,
     draftOverrides: proposeOverrides.length > 0 ? proposeOverrides : null,
+    pendingHelperOpen:
+      response?.mode === "open_helper"
+        ? { helper: response.helper, prefill: response.prefill, assumptions: response.assumptions ?? [] }
+        : null,
   };
 }
 

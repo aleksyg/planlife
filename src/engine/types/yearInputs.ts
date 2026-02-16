@@ -31,6 +31,12 @@ export type PersonYearInputs = {
 
   /** Override pre-tax payroll deductions (monthly) for this yearIndex. */
   preTaxDeductionsMonthly?: number;
+
+  /**
+   * Observed monthly take-home from regular paychecks (base pay only, excludes bonus/equity).
+   * Cashflow anchor: when set, cashInFromBase = value * 12. Tax liability still computed from gross.
+   */
+  observedBaseNetPayMonthly?: number;
 };
 
 export type YearInputs = {

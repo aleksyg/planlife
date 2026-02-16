@@ -52,3 +52,19 @@ export type AiPlannerResponse =
       impactPreviewRequest?: { focusYearIndex?: number };
     };
 
+/** Helper routing: AI detects intent and returns open_helper so UI opens the correct editor with prefill. No overrides. */
+export type AiHelperResponse = {
+  mode: "open_helper";
+  helper: "income" | "home" | "expense" | "retirement" | "oneTimeEvent";
+  prefill: Record<string, unknown>;
+  assumptions?: string[];
+  message?: string;
+};
+
+/** Union of all AI response types; client handles each mode. */
+export type AiUiResponse = AiPlannerResponse | AiHelperResponse;
+
+export function isAiHelperResponse(r: AiUiResponse): r is AiHelperResponse {
+  return r.mode === "open_helper";
+}
+
