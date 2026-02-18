@@ -26,6 +26,7 @@ export function IncomeHelperModal(props: {
   baselinePlan: PlanState;
   prefill?: Record<string, unknown>;
   existingConfig?: IncomeConfig;
+  /** Called with config; modal will call onClose when done (immediately or after confirmation). */
   onSave: (config: IncomeConfig) => void;
 }) {
   const { isOpen, onClose, baselinePlan, prefill = {}, existingConfig, onSave } = props;
@@ -41,6 +42,11 @@ export function IncomeHelperModal(props: {
   const [growthRate, setGrowthRate] = useState(defaultGrowth);
   const [startAge, setStartAge] = useState(defaultStartAge);
   const [observedBaseNetPayMonthly, setObservedBaseNetPayMonthly] = useState<number | "">("");
+  const [saveConfirmation, setSaveConfirmation] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isOpen) setSaveConfirmation(null);
+  }, [isOpen]);
 
   useEffect(() => {
     if (existingConfig) {
@@ -85,7 +91,15 @@ export function IncomeHelperModal(props: {
         : Math.max(0, Number(observedBaseNetPayMonthly));
     if (observed !== undefined) config.observedBaseNetPayMonthly = observed;
     onSave(config);
-    onClose();
+    if (observed !== undefined) {
+      setSaveConfirmation("Income card saved (observed take-home applied to cashflow)");
+      setTimeout(() => {
+        setSaveConfirmation(null);
+        onClose();
+      }, 1500);
+    } else {
+      onClose();
+    }
   };
 
   if (!isOpen) return null;
@@ -149,9 +163,9 @@ export function IncomeHelperModal(props: {
               }}
             />
             <p className="text-xs text-muted-foreground">
-              Optional. What actually hits your bank each month from regular paychecks. Excludes
-              bonuses/equity. We&apos;ll use this for cashflow; taxes still estimated from gross
-              income.
+              {observedBaseNetPayMonthly !== "" && observedBaseNetPayMonthly != null
+                ? "We'll use this for cashflow. Bonuses/equity are modeled separately. Taxes remain estimated from gross income."
+                : "Optional. What actually hits your bank each month from regular paychecks. Excludes bonuses/equity. We'll use this for cashflow; taxes still estimated from gross income."}
             </p>
           </div>
           <div className="space-y-2">
@@ -165,12 +179,16 @@ export function IncomeHelperModal(props: {
               onChange={(e) => setStartAge(parseInt(e.target.value, 10) || baselinePlan.startAge)}
             />
           </div>
-          <div className="flex gap-2 pt-2">
-            <Button onClick={handleSave}>Save</Button>
-            <Button variant="outline" onClick={onClose}>
-              Cancel
-            </Button>
-          </div>
+          {saveConfirmation ? (
+            <p className="text-sm text-muted-foreground">{saveConfirmation}</p>
+          ) : (
+            <div className="flex gap-2 pt-2">
+              <Button onClick={handleSave}>Save</Button>
+              <Button variant="outline" onClick={onClose}>
+                Cancel
+              </Button>
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>

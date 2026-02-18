@@ -125,7 +125,40 @@ function getJsonSchema() {
           required: ["person", "milestones", "cap", "resolutionPolicy"],
         },
         helper: { type: ["string", "null"], enum: ["income", "home", "expense", "retirement", "oneTimeEvent", null] },
-        prefill: { type: ["object", "null"], additionalProperties: true },
+        prefill: {
+          type: ["object", "null"],
+          additionalProperties: false,
+          properties: {
+            baseAnnual: { type: ["number", "null"] },
+            base: { type: ["number", "null"] },
+            salary: { type: ["number", "null"] },
+            bonusAnnual: { type: ["number", "null"] },
+            bonus: { type: ["number", "null"] },
+            growthRate: { type: ["number", "null"] },
+            growth: { type: ["number", "null"] },
+            startAge: { type: ["number", "null"] },
+            age: { type: ["number", "null"] },
+            fromAge: { type: ["number", "null"] },
+            observedNet: { type: ["number", "null"] },
+            observedNetMonthly: { type: ["number", "null"] },
+            observedBaseNetPayMonthly: { type: ["number", "null"] },
+          },
+          required: [
+            "baseAnnual",
+            "base",
+            "salary",
+            "bonusAnnual",
+            "bonus",
+            "growthRate",
+            "growth",
+            "startAge",
+            "age",
+            "fromAge",
+            "observedNet",
+            "observedNetMonthly",
+            "observedBaseNetPayMonthly",
+          ],
+        },
         openHelperMessage: { type: ["string", "null"] },
         openHelperAssumptions: { type: ["array", "null"], items: { type: "string" } },
       },
@@ -488,7 +521,7 @@ export async function POST(req: Request) {
   const system = [
     "You are Planlife AI, a conversational scenario planner.",
     "context.currentValues reflects the current scenario after applying all enabled cards. Propose only the additional changes needed from the current scenario; do not restate existing enabled overrides.",
-    "Income semantics: When user asks for total comp (e.g. 'income to 800k', 'make 800k', 'total comp 800k') at a single age, output totalCompTarget: { fromAge, value, who }. Do NOT output income.user.base for that — the server computes base from bonus. For multi-year targets (e.g. '$1M in 4 years, $2M in 10 years') or a cap (e.g. 'cap at $2.5M'), output totalCompConstraint: { person, milestones: [{ age, value }, ...], cap?: { value, startAge }, resolutionPolicy: 'BASE_ONLY' | 'BONUS_ONLY' | 'PROPORTIONAL' | 'ASK' }. If the user does not specify how to hit the targets, use resolutionPolicy: 'ASK' so the server can ask. Only output income.user.base or income.user.bonus overrides when user explicitly says 'base'/'salary' or 'bonus'. Caps are enforced as hard ceilings (no growth above cap).",
+    "Income changes: Do NOT use totalCompTarget or totalCompConstraint. When the user asks about income, salary, total comp, or earnings (e.g. 'What if I earn $150k?', 'income change', 'make 800k'), use mode='open_helper' with helper='income' and prefill with inferred values (baseAnnual, bonusAnnual, growthRate, startAge). Only use mode='propose' with income.user.base or income.user.bonus when the user explicitly says 'base'/'salary' or 'bonus' AND gives a specific value. For spend/lifestyle/housing changes, continue to use propose with overrides.",
     "When user says 'back to normal' or 'go back to normal' after a temporary range: add a second override at rejoin age (first year after the range) setting income.user.base to context.series.baselineUserBaseByYear[rejoinYearIndex] so total comp rejoins the baseline path. Add assumption: 'Back to normal means rejoining your baseline total compensation at age X.'",
     "Classify the user message: mode='clarify' (ask questions), mode='propose' (assumptions + overrides), or mode='open_helper' when the user wants to edit income/retirement/home/expense via a form. For open_helper: set helper to 'income'|'home'|'expense'|'retirement'|'oneTimeEvent', prefill with inferred values (e.g. baseAnnual, growthRate), and openHelperMessage with a short sentence. Do NOT return overrides when mode=open_helper.",
     "Return JSON only and conform to the provided JSON Schema.",
@@ -621,6 +654,34 @@ export async function POST(req: Request) {
 
   // propose mode
   const proposedOverridesRaw = shape.overrides ?? [];
+
+  // Redirect income totalComp/materialization to Income Editor (open_helper) instead of materializing overrides
+  const hasIncomeTotalComp =
+    shape.totalCompTarget != null ||
+    (shape.totalCompConstraint != null && (shape.totalCompConstraint.milestones?.length ?? 0) > 0);
+  const hasOnlyIncomeOverrides =
+    proposedOverridesRaw.length > 0 &&
+    proposedOverridesRaw.every((o: unknown) =>
+      isRecord(o) &&
+      ["income.user.base", "income.user.bonus", "income.partner.base", "income.partner.bonus"].includes(String(o.target ?? "")),
+    );
+  const intent = deriveIncomeIntent(lastUserText);
+  if (hasIncomeTotalComp || (hasOnlyIncomeOverrides && intent !== "BONUS_ONLY" && intent !== "BASE_ONLY")) {
+    const prefill: Record<string, unknown> = typeof shape.prefill === "object" && shape.prefill ? (shape.prefill as Record<string, unknown>) : {};
+    if (shape.totalCompTarget && !prefill.baseAnnual && !prefill.base && !prefill.salary) {
+      prefill.baseAnnual = shape.totalCompTarget.value;
+      prefill.startAge = shape.totalCompTarget.fromAge;
+    }
+    const out: AiHelperResponse = {
+      mode: "open_helper",
+      helper: "income",
+      prefill,
+      assumptions: shape.openHelperAssumptions ?? shape.assumptions ?? [],
+      message: shape.openHelperMessage ?? "Use the Income editor to set base, bonus, and observed take-home.",
+    };
+    return Response.json(out);
+  }
+
   const errors: string[] = [];
   const overrides: TargetedOverride[] = [];
 
@@ -658,7 +719,6 @@ export async function POST(req: Request) {
   }
 
   // Intent gating: restrict income actions so bonus-only never changes base, etc.
-  const intent = deriveIncomeIntent(lastUserText);
   const gated = applyIntentGate(intent, overrides, shape.totalCompTarget, shape.totalCompConstraint);
   if (gated.forceClarify) {
     const out: AiPlannerResponse = {

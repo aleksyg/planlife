@@ -2,8 +2,18 @@
 
 import { useState } from "react";
 import type { ScenarioCard } from "@/scenario/modifiers";
+import type { IncomeConfig } from "@/scenario/cardConfig";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+
+function formatCurrency(n: number): string {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  }).format(n);
+}
 
 export function ScenarioCardsList(props: {
   cards: ScenarioCard[];
@@ -39,10 +49,25 @@ export function ScenarioCardsList(props: {
                     onChange={(e) => onToggle(card.id, e.target.checked)}
                   />
                   <div className="min-w-0 flex-1">
-                    <div className="text-sm font-medium text-foreground">{card.title}</div>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="text-sm font-medium text-foreground">{card.title}</span>
+                      {card.config?.type === "income" &&
+                        (card.config as IncomeConfig).observedBaseNetPayMonthly !== undefined &&
+                        Number.isFinite((card.config as IncomeConfig).observedBaseNetPayMonthly) && (
+                          <span className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+                            Observed take-home: {formatCurrency((card.config as IncomeConfig).observedBaseNetPayMonthly!)}/mo
+                          </span>
+                        )}
+                    </div>
                     {card.summary ? (
                       <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{card.summary}</p>
                     ) : null}
+                    {card.config?.type === "income" &&
+                      (card.config as IncomeConfig).observedBaseNetPayMonthly !== undefined && (
+                        <p className="mt-0.5 text-xs text-muted-foreground">
+                          Cashflow uses observed take-home (base only)
+                        </p>
+                      )}
                   </div>
                 </label>
                 <div className="flex shrink-0 items-center gap-1">

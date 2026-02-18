@@ -20,6 +20,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { ProjectionBars } from "@/components/app/ProjectionBars";
 import { ScenarioCardsList } from "@/components/app/ScenarioCardsList";
+import { LifeEventsPanel } from "@/scenario/LifeEventsPanel";
 import { ChatPanel } from "@/components/app/chat/ChatPanel";
 import { IncomeHelperModal } from "@/components/helpers/IncomeHelperModal";
 
@@ -157,8 +158,8 @@ export default function PlanYourLifePage() {
         });
       }
       setEditingCardId(null);
-      setIncomeModalOpen(false);
       clearDraftRef.current?.();
+      // Modal closes itself (possibly after brief confirmation when observed take-home is set)
     },
     [plan, editingCardId, cards],
   );
@@ -191,6 +192,7 @@ export default function PlanYourLifePage() {
     <div className="min-h-[calc(100vh-120px)] rounded-3xl bg-muted/10 p-4 sm:p-6">
       <div className="grid gap-6 lg:grid-cols-[360px_1fr]">
         <div className="space-y-4">
+        <LifeEventsPanel />
         <Card>
           <CardHeader>
             <CardTitle>Scenario changes</CardTitle>
@@ -198,7 +200,19 @@ export default function PlanYourLifePage() {
               Toggle cards on/off. Scenario = baseline + enabled cards (later wins). Draft previews last.
             </CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-3">
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full rounded-xl"
+              onClick={() => {
+                setIncomeModalPrefill({});
+                setEditingCardId(null);
+                setIncomeModalOpen(true);
+              }}
+            >
+              Income editor
+            </Button>
             <ScenarioCardsList
               cards={cards}
               onToggle={handleToggleCard}
@@ -260,6 +274,9 @@ export default function PlanYourLifePage() {
                       <th className="px-2 py-2 text-right font-medium">Partner base (SC)</th>
                       <th className="px-2 py-2 text-right font-medium">Partner bonus (BL)</th>
                       <th className="px-2 py-2 text-right font-medium">Partner bonus (SC)</th>
+                      {hasScenario && (
+                        <th className="px-2 py-2 text-right font-medium">Base cash (SC)</th>
+                      )}
                     </tr>
                   </thead>
                   <tbody>
@@ -293,6 +310,13 @@ export default function PlanYourLifePage() {
                           <td className={`px-2 py-1.5 text-right tabular-nums ${hasPartner && hasScenario && Math.abs(pBoSc - pBoBl) > 0.5 ? "font-medium" : ""}`}>
                             {hasPartner ? formatCurrency(pBoSc) : "—"}
                           </td>
+                          {hasScenario && (
+                            <td className="px-2 py-1.5 text-right text-xs text-muted-foreground">
+                              {scenarioYearInputs[i]?.user?.observedBaseNetPayMonthly != null
+                                ? `Observed ${formatCurrency(scenarioYearInputs[i]!.user!.observedBaseNetPayMonthly!)}/mo`
+                                : "Modeled"}
+                            </td>
+                          )}
                         </tr>
                       );
                     })}
@@ -310,7 +334,10 @@ export default function PlanYourLifePage() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <ProjectionBars rows={currentRows} />
+              <ProjectionBars
+              rows={currentRows}
+              yearInputs={hasScenario ? scenarioYearInputs : undefined}
+            />
               {delta != null ? (
                 <div className="mt-3 rounded-xl border border-border bg-muted/10 px-3 py-2 text-sm">
                   <div className="flex items-center justify-between">

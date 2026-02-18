@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import type { YearRow } from "@/engine";
+import type { YearInputs, YearRow } from "@/engine";
 import { cn } from "@/lib/utils";
 
 function formatCurrency(n: number): string {
@@ -15,6 +15,7 @@ function formatCurrency(n: number): string {
 
 export type ProjectionBarsProps = {
   rows: readonly YearRow[];
+  yearInputs?: readonly YearInputs[];
   heightClassName?: string;
   highlightYearIndex?: number | null;
   onHoverYearIndex?: (yearIndex: number | null) => void;
@@ -22,6 +23,7 @@ export type ProjectionBarsProps = {
 
 export function ProjectionBars({
   rows,
+  yearInputs,
   heightClassName = "h-28",
   highlightYearIndex = null,
   onHoverYearIndex,
@@ -72,10 +74,19 @@ export function ProjectionBars({
       </div>
 
       {activeRow ? (
-        <div className="pointer-events-none absolute right-4 top-4 w-[220px] rounded-xl border border-border bg-background/95 p-3 shadow-lg">
+        <div className="pointer-events-none absolute right-4 top-4 w-[240px] rounded-xl border border-border bg-background/95 p-3 shadow-lg">
           <div className="text-xs text-muted-foreground">
             Year {activeRow.yearIndex} · Age {activeRow.age}
           </div>
+          {yearInputs && yearInputs[activeRow.yearIndex]?.user?.observedBaseNetPayMonthly != null ? (
+            <div className="mt-1 text-xs text-muted-foreground">
+              Base cashflow: Observed ({formatCurrency(yearInputs[activeRow.yearIndex]!.user!.observedBaseNetPayMonthly!)}/mo)
+            </div>
+          ) : (
+            yearInputs && (
+              <div className="mt-1 text-xs text-muted-foreground">Base cashflow: Modeled</div>
+            )
+          )}
           <div className="mt-2 grid grid-cols-2 gap-x-2 gap-y-1 text-xs">
             <div className="text-muted-foreground">Income</div>
             <div className="text-right font-medium">{formatCurrency(activeRow.grossIncome)}</div>
