@@ -1,11 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { simulatePlan } from "@/engine";
 import type { YearRow } from "@/engine";
 import type { TargetedOverride } from "@/ai/types";
 import { loadBaselineFromStorage } from "@/app/planStateStorage";
+import { loadLifeEvents, saveLifeEvents } from "@/app/lifeEventsStorage";
 import {
   loadScenarioCards,
   saveScenarioCards,
@@ -15,6 +16,8 @@ import {
 import type { ScenarioCard } from "@/scenario/modifiers";
 import { getScenarioYearInputs } from "@/scenario/modifiers";
 import { buildOverridesFromCardConfig } from "@/scenario/configToOverrides";
+import { buildOverridesFromLifeEvent } from "@/scenario/lifeEvents/toTargetedOverrides";
+import type { LifeEvent } from "@/scenario/lifeEvents/types";
 import type { IncomeConfig } from "@/scenario/cardConfig";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -33,14 +36,96 @@ function formatCurrency(n: number): string {
   }).format(n);
 }
 
+const lifeCardId = (id: string) => `life-${id}`;
+
 export default function PlanYourLifePage() {
   const plan = loadBaselineFromStorage();
   const [cards, setCards] = useState<ScenarioCard[]>(() => loadScenarioCards());
+  const [lifeEvents, setLifeEvents] = useState<LifeEvent[]>(() => loadLifeEvents());
   const [draftOverrides, setDraftOverrides] = useState<TargetedOverride[] | null>(null);
   const clearDraftRef = useRef<(() => void) | null>(null);
   const [incomeModalOpen, setIncomeModalOpen] = useState(false);
   const [incomeModalPrefill, setIncomeModalPrefill] = useState<Record<string, unknown>>({});
   const [editingCardId, setEditingCardId] = useState<string | null>(null);
+
+  useEffect(() => {
+    saveLifeEvents(lifeEvents);
+  }, [lifeEvents]);
+
+  // Sync scenario cards from life events on mount (so stored life events get a card each).
+  useEffect(() => {
+    if (lifeEvents.length === 0) return;
+    const opts = plan ? { minAge: plan.startAge, maxAge: plan.endAge } : undefined;
+    setCards((prev) => {
+      let next = prev.filter((c) => !c.id.startsWith("life-"));
+      for (const evt of lifeEvents) {
+        const id = lifeCardId(evt.id);
+        const overrides = buildOverridesFromLifeEvent(evt, opts);
+        next = next.concat({
+          id,
+          createdAt: Date.now(),
+          title: evt.title || "Life event",
+          summary: evt.summary.join(" • "),
+          enabled: evt.enabled,
+          overrides,
+        });
+      }
+      next.sort((a, b) => a.createdAt - b.createdAt);
+      saveScenarioCards(next);
+      return next;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- run once on mount when we have plan + lifeEvents
+  }, []);
+
+  function upsertLifeEvent(evt: LifeEvent) {
+    setLifeEvents((prev) =>
+      prev.some((e) => e.id === evt.id) ? prev.map((e) => (e.id === evt.id ? evt : e)) : [evt, ...prev],
+    );
+    const opts = plan ? { minAge: plan.startAge, maxAge: plan.endAge } : undefined;
+    const overrides = buildOverridesFromLifeEvent(evt, opts);
+    setCards((prev) => {
+      const id = lifeCardId(evt.id);
+      const existing = prev.find((c) => c.id === id);
+      const nextCard: ScenarioCard = existing
+        ? {
+            ...existing,
+            title: evt.title || "Life event",
+            summary: evt.summary.join(" • "),
+            enabled: evt.enabled,
+            overrides,
+          }
+        : {
+            id,
+            createdAt: Date.now(),
+            title: evt.title || "Life event",
+            summary: evt.summary.join(" • "),
+            enabled: evt.enabled,
+            overrides,
+          };
+      const without = prev.filter((c) => c.id !== id);
+      const next = [...without, nextCard].sort((a, b) => a.createdAt - b.createdAt);
+      saveScenarioCards(next);
+      return next;
+    });
+  }
+
+  function deleteLifeEvent(id: string) {
+    setLifeEvents((prev) => prev.filter((e) => e.id !== id));
+    setCards((prev) => {
+      const next = prev.filter((c) => c.id !== lifeCardId(id));
+      saveScenarioCards(next);
+      return next;
+    });
+  }
+
+  function toggleLifeEventEnabled(id: string, enabled: boolean) {
+    setLifeEvents((prev) => prev.map((e) => (e.id === id ? { ...e, enabled } : e)));
+    setCards((prev) => {
+      const next = prev.map((c) => (c.id === lifeCardId(id) ? { ...c, enabled } : c));
+      saveScenarioCards(next);
+      return next;
+    });
+  }
 
   // Baseline: immutable; never mutated by scenario.
   const rows: YearRow[] = plan ? simulatePlan(plan) : [];
@@ -192,7 +277,12 @@ export default function PlanYourLifePage() {
     <div className="min-h-[calc(100vh-120px)] rounded-3xl bg-muted/10 p-4 sm:p-6">
       <div className="grid gap-6 lg:grid-cols-[360px_1fr]">
         <div className="space-y-4">
-        <LifeEventsPanel />
+        <LifeEventsPanel
+          events={lifeEvents}
+          onUpsert={upsertLifeEvent}
+          onDelete={deleteLifeEvent}
+          onToggleEnabled={toggleLifeEventEnabled}
+        />
         <Card>
           <CardHeader>
             <CardTitle>Scenario changes</CardTitle>

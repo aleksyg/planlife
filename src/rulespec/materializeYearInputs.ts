@@ -29,7 +29,10 @@ export function materializeYearInputs(_plan: PlanState, specs: RuleSpecInputs): 
   const n = specs.timeline.length;
 
   const userBase = buildSeries(specs.income.user.base, specs.timeline);
-  const userBonus = buildSeries(specs.income.user.bonus, specs.timeline);
+  // Bonus: add overrides are one-time only (do not compound into future years).
+  const userBonus = buildSeries(specs.income.user.bonus, specs.timeline, {
+    addOverridesNonRecurring: true,
+  });
   const lifestyle = buildSeries(specs.spend.lifestyleMonthly, specs.timeline);
   const housing = buildSeries(specs.spend.housingMonthly, specs.timeline);
 
@@ -39,7 +42,12 @@ export function materializeYearInputs(_plan: PlanState, specs: RuleSpecInputs): 
   assertLength("housing", housing, n);
 
   const partnerBase = specs.partnerEnabled && specs.income.partner ? buildSeries(specs.income.partner.base, specs.timeline) : null;
-  const partnerBonus = specs.partnerEnabled && specs.income.partner ? buildSeries(specs.income.partner.bonus, specs.timeline) : null;
+  const partnerBonus =
+    specs.partnerEnabled && specs.income.partner
+      ? buildSeries(specs.income.partner.bonus, specs.timeline, {
+          addOverridesNonRecurring: true,
+        })
+      : null;
   if (partnerBase) assertLength("partnerBase", partnerBase, n);
   if (partnerBonus) assertLength("partnerBonus", partnerBonus, n);
 

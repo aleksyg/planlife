@@ -50,7 +50,7 @@ function overrideAppliesAt(op: Override, index: number, tl: Timeline): boolean {
   return index >= fromIdx;
 }
 
-function applyOverrideAt(op: Override, value: number, tl: Timeline): number {
+function applyOverrideAt(op: Override, value: number, _tl: Timeline): number {
   assertFinite(op.value, "Override value must be finite.");
   if (op.kind === "set") {
     if (op.value < 0) throw new Error("Set override value must be >= 0.");
@@ -74,44 +74,78 @@ function applyOverrideAt(op: Override, value: number, tl: Timeline): number {
   return _;
 }
 
+/** When true, `add` overrides affect only that year's output and are NOT carried forward for growth. */
+export type BuildSeriesOptions = { addOverridesNonRecurring?: boolean };
+
 /**
  * Build series in a single forward pass: year i depends only on value[i-1] and growth[i],
  * then applies income overrides at i; next year compounds from the overridden value.
  * Eliminates snapback and flat-forever bugs (no save/restore or regrow patches).
+ *
+ * When addOverridesNonRecurring is true (e.g. for bonus): recurring value is built from
+ * set/cap/mult only and carries forward; add overrides are summed per year and added to
+ * output only (bonusTotalAnnual = bonusRecurringAnnual + bonusAddAnnual). Sanity: add
+ * never compounds into future years.
  */
-export function buildSeries(spec: ComponentSpec, tl: Timeline): number[] {
+export function buildSeries(
+  spec: ComponentSpec,
+  tl: Timeline,
+  options?: BuildSeriesOptions,
+): number[] {
   assertFinite(spec.startValue, "startValue must be finite.");
   if (spec.growth.type === "pct") assertFinite(spec.growth.annualPct, "annualPct must be finite.");
   else assertFinite(spec.growth.annualAmount, "annualAmount must be finite.");
 
+  const addNonRecurring = options?.addOverridesNonRecurring === true;
+  const allOverrides = orderOverrides(spec.overrides);
+  const recurringOps = addNonRecurring ? allOverrides.filter((op) => op.kind !== "add") : allOverrides;
+  const addOps = addNonRecurring ? allOverrides.filter((op): op is Override & { kind: "add" } => op.kind === "add") : [];
+
   const growth = buildGrowthByIndex(spec, tl);
-  const ordered = orderOverrides(spec.overrides);
 
   const out: number[] = [spec.startValue];
-  // Apply overrides at index 0 (e.g. "starting now" when fromAge = startAge)
+  // Index 0: apply only recurring overrides (set/cap/mult)
   let v0 = out[0]!;
-  for (const op of ordered) {
+  for (const op of recurringOps) {
     if (overrideAppliesAt(op, 0, tl)) {
       v0 = applyOverrideAt(op, v0, tl);
     }
   }
-  out[0] = v0;
+  let addSum0 = 0;
+  for (const op of addOps) {
+    if (overrideAppliesAt(op, 0, tl)) {
+      assertFinite(op.value, "Add override value must be finite.");
+      addSum0 += op.value;
+    }
+  }
+  out[0] = v0 + addSum0;
 
   for (let i = 1; i < tl.length; i++) {
-    const prev = out[i - 1]!;
+    const prevRecurring = addNonRecurring ? v0 : out[i - 1]!;
     let v: number;
     if (spec.growth.type === "pct") {
-      v = prev * (1 + growth[i]!);
+      v = prevRecurring * (1 + growth[i]!);
     } else {
       assertFinite(spec.growth.annualAmount, "Growth annualAmount must be finite.");
-      v = prev + spec.growth.annualAmount;
+      v = prevRecurring + spec.growth.annualAmount;
     }
-    for (const op of ordered) {
+    for (const op of recurringOps) {
       if (overrideAppliesAt(op, i, tl)) {
         v = applyOverrideAt(op, v, tl);
       }
     }
-    out.push(v);
+    if (addNonRecurring) {
+      v0 = v;
+    }
+    // Sanity: add overrides affect this year only; recurring chain (v) never includes them.
+    let addSum = 0;
+    for (const op of addOps) {
+      if (overrideAppliesAt(op, i, tl)) {
+        assertFinite(op.value, "Add override value must be finite.");
+        addSum += op.value;
+      }
+    }
+    out.push(v + addSum);
   }
 
   return out;

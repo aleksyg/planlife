@@ -7,8 +7,19 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { LifeEventCard } from "@/scenario/LifeEventCard";
 
-export function LifeEventsPanel() {
-  const [events, setEvents] = useState<LifeEvent[]>(() => []);
+export type LifeEventsPanelProps = {
+  events: LifeEvent[];
+  onUpsert: (evt: LifeEvent) => void;
+  onDelete: (id: string) => void;
+  onToggleEnabled: (id: string, enabled: boolean) => void;
+};
+
+export function LifeEventsPanel({
+  events,
+  onUpsert,
+  onDelete,
+  onToggleEnabled,
+}: LifeEventsPanelProps) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
 
@@ -31,23 +42,13 @@ export function LifeEventsPanel() {
   };
 
   const onSaveEvent = (evt: LifeEvent) => {
-    setEvents((prev) => {
-      const exists = prev.some((e) => e.id === evt.id);
-      if (!exists) return [evt, ...prev];
-      return prev.map((e) => (e.id === evt.id ? evt : e));
-    });
+    onUpsert(evt);
     onCloseModal();
   };
 
   const onDeleteEvent = (id: string) => {
-    setEvents((prev) => prev.filter((e) => e.id !== id));
+    onDelete(id);
     onCloseModal();
-  };
-
-  const onToggleEnabled = (id: string, enabled: boolean) => {
-    setEvents((prev) =>
-      prev.map((e) => (e.id === id ? { ...e, enabled } : e)),
-    );
   };
 
   return (
