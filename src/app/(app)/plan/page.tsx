@@ -39,7 +39,12 @@ function formatCurrency(n: number): string {
 const lifeCardId = (id: string) => `life-${id}`;
 
 export default function PlanYourLifePage() {
-  const plan = loadBaselineFromStorage();
+  // Defer storage read to client after mount so server and first client render match (avoids hydration error).
+  const [plan, setPlan] = useState<ReturnType<typeof loadBaselineFromStorage>>(null);
+  useEffect(() => {
+    setPlan(loadBaselineFromStorage());
+  }, []);
+
   const [cards, setCards] = useState<ScenarioCard[]>(() => loadScenarioCards());
   const [lifeEvents, setLifeEvents] = useState<LifeEvent[]>(() => loadLifeEvents());
   const [draftOverrides, setDraftOverrides] = useState<TargetedOverride[] | null>(null);
@@ -52,10 +57,12 @@ export default function PlanYourLifePage() {
     saveLifeEvents(lifeEvents);
   }, [lifeEvents]);
 
-  // Sync scenario cards from life events on mount (so stored life events get a card each).
+  const didSyncLifeCardsRef = useRef(false);
+  // Sync scenario cards from life events once plan is loaded (so stored life events get a card each).
   useEffect(() => {
-    if (lifeEvents.length === 0) return;
-    const opts = plan ? { minAge: plan.startAge, maxAge: plan.endAge } : undefined;
+    if (!plan || lifeEvents.length === 0 || didSyncLifeCardsRef.current) return;
+    didSyncLifeCardsRef.current = true;
+    const opts = { minAge: plan.startAge, maxAge: plan.endAge };
     setCards((prev) => {
       let next = prev.filter((c) => !c.id.startsWith("life-"));
       for (const evt of lifeEvents) {
@@ -74,8 +81,7 @@ export default function PlanYourLifePage() {
       saveScenarioCards(next);
       return next;
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- run once on mount when we have plan + lifeEvents
-  }, []);
+  }, [plan, lifeEvents]);
 
   function upsertLifeEvent(evt: LifeEvent) {
     setLifeEvents((prev) =>
